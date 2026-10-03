@@ -1,0 +1,221 @@
+# MULTIPLATFORM LIVE TRIVIA
+
+ DAY-TO-DAY USER GUIDE
+
+---
+
+## 1. START THE PROGRAM
+
+1. Open the project folder.
+2. Open `main.py` in your Python editor.
+3. Run `main.py` using your editor's Run button or F5, depending on the editor.
+4. Wait until the server starts.
+
+**Important:** Keep the Python process running while using the dashboard and livestream integration.
+
+## 2. OPEN THE HOST DASHBOARD
+
+Open this URL in your browser:
+
+`http://127.0.0.1:8000/`
+
+Use the dashboard to:
+
+* Start and stop the trivia game.
+* View the current question and countdown.
+* View results and the leaderboard.
+* Check platform connection status.
+
+## 3. OPEN THE OBS OVERLAY (OPTIONAL)
+
+In OBS, add a **Browser Source** and enter:
+
+`http://127.0.0.1:8000/overlay`
+
+The overlay displays trivia information intended for the livestream.
+
+## 4. LOAD OR CHANGE QUESTIONS
+
+Questions are stored in:
+
+`data/questions.json`
+
+Open the file in a text editor. Follow the same JSON structure as the questions already in the file.
+
+Example:
+
+```json
+[
+  {
+    "question": "What is the capital of France?",
+    "answers": ["Paris"]
+  },
+  {
+    "question": "What is 2 + 2?",
+    "answers": ["4"]
+  }
+]
+```
+
+**Important:**
+
+* Keep the JSON syntax valid.
+* Keep the structure expected by the existing project.
+* Save the file before starting the game.
+* Restart `main.py` after changing questions if the program loads them only at startup.
+
+## 5. USE MULTIPLE CORRECT ANSWERS
+
+A question can accept multiple answers. Put all accepted answers in the `answers` list.
+
+Example:
+
+```json
+{
+  "question": "Name a country that borders Germany.",
+  "answers": ["France", "Poland", "Austria"]
+}
+```
+
+The trivia engine checks viewers' answers against the accepted answers according to its answer-matching rules.
+
+Use different accepted answers only when they genuinely answer the question. Capitalization or spelling variations may already be handled by the matcher, so duplicates such as `"Jupiter"` and `"jupiter"` may not be necessary.
+
+## 6. TIKTOK SETUP
+
+The TikTok configuration is stored in:
+
+`config.json`
+
+Before starting, make sure the configured TikTok username matches the account that is currently LIVE.
+
+## 7. FACEBOOK LIVE SETUP
+
+The Facebook settings are stored in `config.json`. Look for the `facebook` section, for example:
+
+```json
+"facebook": {
+  "enabled": true,
+  "live_video_id": "CURRENT_LIVE_VIDEO_ID",
+  "poll_interval_ms": 500
+}
+```
+
+The exact structure may include other settings; do not remove them.
+
+**Important:** A new Facebook LIVE may have a different Live Video ID.
+
+### How to find the Live Video ID
+
+1. Start the Facebook LIVE from the Facebook Page connected to your app.
+2. Open the livestream on Facebook.
+3. Copy the livestream URL.
+4. Check whether the URL contains the video's ID.
+
+Example URL:
+
+`https://www.facebook.com/YourPage/videos/123456789012345/`
+
+In this example, `123456789012345` is a *possible* video ID. Not every Facebook URL contains the correct ID, so verify it if the connection fails.
+
+Update `live_video_id` in `config.json` before running the program for that broadcast.
+
+## 8. START A TRIVIA SESSION
+
+Recommended order:
+
+1. Start your TikTok and/or Facebook LIVE stream.
+2. Confirm the Facebook Live Video ID is correct for the current broadcast.
+3. Check that `data/questions.json` contains the questions you want to use.
+4. Run `main.py`.
+5. Open the host dashboard.
+6. Confirm the required platforms are connected.
+7. Open the OBS overlay if you use it.
+8. Click **START** on the dashboard.
+
+The game should proceed through the loaded questions automatically.
+
+## 9. HOW VIEWERS ANSWER
+
+Viewers submit answers through the livestream chat.
+
+The program reads the comments and checks them against the accepted answers for the current question. Correct answers receive points according to the game's rules.
+
+The current game rules limit each user on each platform to one answer attempt per question. Multiple viewers can answer correctly and receive points.
+
+## 10. STOPPING THE GAME
+
+To stop the current trivia session, click **STOP** on the dashboard.
+
+To shut down the entire program, stop the Python process running `main.py`.
+
+**Important:** Do not assume that a stopped game can be resumed from where it left off. To begin a fresh run, use the dashboard's START control if supported by the current state; if the game cannot be restarted, stop and restart `main.py`.
+
+## 11. STARTING A NEW FACEBOOK LIVE
+
+For a new Facebook broadcast:
+
+1. Start the new Facebook LIVE.
+2. Obtain the correct Live Video ID.
+3. Update `live_video_id` in `config.json`.
+4. Restart `main.py` so it loads the updated configuration.
+5. Open the dashboard.
+6. Check the platform connections.
+7. Click **START**.
+
+## 12. WHERE LEADERBOARD DATA IS SAVED
+
+The leaderboard files are saved in the project's data directory:
+
+* `data/leaderboard.json` — leaderboard data in JSON format.
+* `data/leaderboard.txt` — a readable text version of the leaderboard.
+
+The program saves leaderboard data at the relevant results or finished states.
+
+If automatic clearing at program startup has been added to `main.py`, the old leaderboard files will be emptied when the program starts. The final leaderboard can then remain saved after the game ends until the next program startup.
+
+## 13. IF SOMETHING IS NOT WORKING
+
+Check these items first:
+
+* Is `main.py` running?
+* Does `http://127.0.0.1:8000/` open?
+* Is `data/questions.json` valid JSON?
+* Did you save your question changes?
+* Is the TikTok username correct?
+* Is the Facebook Live Video ID correct for the current broadcast?
+* Are the livestreams actually running?
+* Does the dashboard show the required platforms as connected?
+* Does the terminal show connection errors or other useful messages?
+
+Keep the terminal open so you can read any errors.
+
+## 14. IMPORTANT FILES AND URLS
+
+| Item                             | Location                        |
+| -------------------------------- | ------------------------------- |
+| Main program                     | `main.py`                       |
+| Questions                        | `data/questions.json`           |
+| Configuration                    | `config.json`                   |
+| Environment variables and tokens | `.env`                          |
+| Leaderboard JSON                 | `data/leaderboard.json`         |
+| Leaderboard text                 | `data/leaderboard.txt`          |
+| Host dashboard                   | `http://127.0.0.1:8000/`        |
+| OBS overlay (optional)           | `http://127.0.0.1:8000/overlay` |
+
+**Security:** Never share your `.env` file or expose your Facebook access token in screenshots, chat messages, or public repositories.
+
+## QUICK DAILY CHECK
+
+1. Start the TikTok and/or Facebook LIVE stream.
+2. Update the Facebook Live Video ID if this is a new broadcast.
+3. Check the questions.
+4. Run `main.py`.
+5. Open the dashboard.
+6. Confirm platform connections.
+7. Open the OBS overlay if needed.
+8. Click **START**.
+9. Let the questions run.
+10. Check the results and leaderboard.
+
+**END OF GUIDE**

@@ -3,3 +3,4 @@ users.json
 keys.py
 __pycache__/
 *.pyc
+.env

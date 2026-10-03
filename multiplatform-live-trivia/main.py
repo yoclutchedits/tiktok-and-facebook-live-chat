@@ -198,6 +198,7 @@ async def lifespan(app: FastAPI):
             )
         ),
     )
+    persist_leaderboard(engine.get_snapshot())
 
     app.state.engine = engine
     app.state.chat_queue = chat_queue
