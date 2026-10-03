@@ -97,7 +97,7 @@ class FacebookAdapter:
         )
 
         url = (
-            f"https://graph.facebook.com/v18.0/"
+            f"https://graph.facebook.com/v26.0/"
             f"{self.live_video_id}/comments"
         )
 
