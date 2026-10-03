@@ -269,29 +269,26 @@ class TriviaEngine:
 
     async def _drain_eligible_queue(self) -> None:
         """
-        Give already-queued messages a short grace period to be processed.
+        Process all messages already queued when draining begins.
 
-        Actual eligibility is still decided by ChatMessage.received_at,
-        not by the moment the queue worker happens to process the message.
+        Eligibility is determined by each message's received_at timestamp
+        in _handle_chat_message(), not by the time it is processed.
         """
-        idle_since: Optional[float] = None
-        drain_started = time.monotonic()
-
         while self._running:
-            now = time.monotonic()
-
-            if now - drain_started >= self.drain_hard_cap_sec:
+            try:
+                msg: ChatMessage = self.chat_queue.get_nowait()
+            except asyncio.QueueEmpty:
                 break
 
-            if self.chat_queue.empty():
-                if idle_since is None:
-                    idle_since = now
-                elif now - idle_since >= self.drain_idle_sec:
-                    break
-            else:
-                idle_since = None
+            try:
+                self._handle_chat_message(msg)
+            except Exception:
+                logger.exception(
+                    "Failed to process chat message during drain."
+                )
+            finally:
+                self.chat_queue.task_done()
 
-            await asyncio.sleep(0.01)
 
     # ------------------------------------------------------------------
     # Message evaluation

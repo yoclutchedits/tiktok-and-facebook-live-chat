@@ -105,7 +105,121 @@ def test_message_before_round_start_is_rejected():
     )
 
     assert engine.get_snapshot().leaderboard == []
+def test_message_at_exact_deadline_is_rejected():
+    engine = make_engine(
+        [
+            Question(
+                question="Capital?",
+                answers=("Paris",),
+            )
+        ]
+    )
 
+    prepare_active_round(
+        engine,
+        start=100.0,
+        deadline=110.0,
+    )
+
+    engine._handle_chat_message(
+        make_message(
+            user_id="u1",
+            received_at=110.0,
+        )
+    )
+
+    assert engine.get_snapshot().leaderboard == []
+
+
+def test_message_before_round_start_is_rejected():
+    engine = make_engine(
+        [
+            Question(
+                question="Capital?",
+                answers=("Paris",),
+            )
+        ]
+    )
+
+    prepare_active_round(
+        engine,
+        start=100.0,
+        deadline=110.0,
+    )
+
+    engine._handle_chat_message(
+        make_message(
+            user_id="u1",
+            received_at=99.999,
+        )
+    )
+
+    assert engine.get_snapshot().leaderboard == []
+
+
+@pytest.mark.asyncio
+async def test_drain_processes_queued_eligible_message():
+    engine = make_engine(
+        [
+            Question(
+                question="Capital?",
+                answers=("Paris",),
+            )
+        ]
+    )
+
+    engine._running = True
+    engine.state = GameState.DRAINING
+    engine.current_question_index = 0
+    engine.round_start_mono = 100.0
+    engine.current_deadline = 110.0
+
+    await engine.chat_queue.put(
+        make_message(
+            user_id="u1",
+            username="Alice",
+            text="Paris",
+            received_at=101.0,
+        )
+    )
+
+    await engine._drain_eligible_queue()
+
+    leaderboard = engine.get_snapshot().leaderboard
+
+    assert len(leaderboard) == 1
+    assert leaderboard[0]["display_name"] == "Alice"
+    assert engine.chat_queue.empty()
+
+def test_one_attempt_per_user_even_when_first_attempt_is_wrong():
+    engine = make_engine(
+        [
+            Question(
+                question="Capital?",
+                answers=("Paris",),
+            )
+        ]
+    )
+
+    prepare_active_round(engine)
+
+    engine._handle_chat_message(
+        make_message(
+            user_id="u1",
+            text="London",
+            received_at=101.0,
+        )
+    )
+
+    engine._handle_chat_message(
+        make_message(
+            user_id="u1",
+            text="Paris",
+            received_at=102.0,
+        )
+    )
+
+    assert engine.get_snapshot().leaderboard == []
 
 def test_one_attempt_per_user_even_when_first_attempt_is_wrong():
     engine = make_engine(
@@ -284,3 +398,34 @@ async def test_engine_first_correct_answer_scores():
     assert leaderboard[0]["score"] == 1
 
     await engine.stop()
+
+@pytest.mark.asyncio
+async def test_drain_rejects_message_received_at_deadline():
+    engine = make_engine(
+        [
+            Question(
+                question="Capital?",
+                answers=("Paris",),
+            )
+        ]
+    )
+
+    engine._running = True
+    engine.state = GameState.DRAINING
+    engine.current_question_index = 0
+    engine.round_start_mono = 100.0
+    engine.current_deadline = 110.0
+
+    await engine.chat_queue.put(
+        make_message(
+            user_id="u1",
+            username="Alice",
+            text="Paris",
+            received_at=110.0,
+        )
+    )
+
+    await engine._drain_eligible_queue()
+
+    assert engine.get_snapshot().leaderboard == []
+    assert engine.chat_queue.empty()

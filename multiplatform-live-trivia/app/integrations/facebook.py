@@ -1,3 +1,4 @@
+
 """Facebook LIVE polling adapter."""
 from __future__ import annotations
 
@@ -134,35 +135,33 @@ class FacebookAdapter:
 
                     data = response.json().get("data", [])
 
-                    # Oldest to newest.
+                    # Process comments from oldest to newest.
                     for item in reversed(data):
                         message_id = item.get("id")
 
                         if not message_id:
                             continue
 
-                        if not self._mark_seen(str(message_id)):
+                        message_id = str(message_id)
+
+                        # Skip comments already queued successfully.
+                        # Do not mark a new comment as seen yet.
+                        if message_id in self.seen_message_ids:
                             continue
 
                         user_data = item.get("from") or {}
 
                         user_id = str(
-                            user_data.get("id")
-                            or "unknown"
+                            user_data.get("id") or "unknown"
                         )
 
                         username = str(
-                            user_data.get("name")
-                            or user_id
+                            user_data.get("name") or user_id
                         )
 
-                        text = str(
-                            item.get("message")
-                            or ""
-                        )
+                        text = str(item.get("message") or "")
 
                         created_at: Optional[datetime] = None
-
                         created_str = item.get("created_time")
 
                         if created_str:
@@ -182,9 +181,7 @@ class FacebookAdapter:
                                     created_str,
                                 )
 
-                        # IMPORTANT:
-                        # Capture receipt time when this comment is actually
-                        # processed, not before the HTTP request.
+                        # Capture receipt time when this comment is processed.
                         received_at = time.monotonic()
 
                         message = ChatMessage(
@@ -193,19 +190,23 @@ class FacebookAdapter:
                             username=username,
                             text=text,
                             received_at=received_at,
-                            message_id=str(message_id),
+                            message_id=message_id,
                             platform_created_at=created_at,
                         )
 
                         try:
+                            # Enqueue first. Mark as seen only if enqueue
+                            # succeeds, allowing full-queue comments to retry.
                             self.chat_queue.put_nowait(message)
+                            self._mark_seen(message_id)
 
                         except asyncio.QueueFull:
                             self.dropped_messages += 1
 
                             logger.warning(
-                                "Facebook chat queue full; dropped "
-                                "comment %s (total dropped: %d)",
+                                "Facebook chat queue full; comment %s "
+                                "will be retried on a later poll "
+                                "(total queue-full events: %d)",
                                 message_id,
                                 self.dropped_messages,
                             )
