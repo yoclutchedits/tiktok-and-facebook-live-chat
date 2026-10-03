@@ -445,62 +445,58 @@
     }
   }
 
-  async function triggerStart() {
-    if (
-      !currentSnapshot ||
-      currentSnapshot.state !==
-        "WAITING_FOR_START"
-    ) {
-      return;
-    }
-
-    try {
-      const response =
-        await fetch(
-          "/game/start",
-          {
-            method: "POST",
-          }
-        );
-
-      if (!response.ok) {
-        console.error(
-          "START request failed:",
-          response.status
-        );
-      }
-    } catch (error) {
-      console.error(
-        "Failed to start game:",
-        error
-      );
-    }
+async function triggerStart() {
+  if (
+    !currentSnapshot ||
+    currentSnapshot.state !== "WAITING_FOR_START"
+  ) {
+    return;
   }
 
-  async function triggerStop() {
-    try {
-      const response =
-        await fetch(
-          "/game/stop",
-          {
-            method: "POST",
-          }
-        );
-
-      if (!response.ok) {
-        console.error(
-          "STOP request failed:",
-          response.status
-        );
+  try {
+    const response = await fetch(
+      "/game/start",
+      {
+        method: "POST"
       }
-    } catch (error) {
+    );
+
+    if (!response.ok) {
       console.error(
-        "Failed to stop game:",
-        error
+        "START request failed:",
+        response.status
       );
     }
+  } catch (error) {
+    console.error(
+      "Failed to start game:",
+      error
+    );
   }
+}
 
+async function triggerStop() {
+  try {
+    const response = await fetch(
+      "/game/stop",
+      {
+        method: "POST"
+      }
+    );
+
+    if (!response.ok) {
+      console.error(
+        "STOP request failed:",
+        response.status
+      );
+    }
+  } catch (error) {
+    console.error(
+      "Failed to stop game:",
+      error
+    );
+  }
+}
   if (btnStart) {
     btnStart.addEventListener(
       "click",

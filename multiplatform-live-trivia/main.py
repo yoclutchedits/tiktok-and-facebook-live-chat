@@ -272,9 +272,6 @@ async def lifespan(app: FastAPI):
         last_persisted_state = None
 
         while True:
-            if engine.state == GameState.STOPPED:
-                break
-
             snapshot = engine.get_snapshot()
 
             snapshot.platforms = build_platform_snapshot(
@@ -304,6 +301,9 @@ async def lifespan(app: FastAPI):
                 GameState.FINISHED.value,
             ):
                 last_persisted_state = None
+
+            if snapshot.state == GameState.STOPPED.value:
+                break
 
             await asyncio.sleep(0.1)
 

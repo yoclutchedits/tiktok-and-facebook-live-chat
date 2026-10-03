@@ -105,56 +105,6 @@ def test_message_before_round_start_is_rejected():
     )
 
     assert engine.get_snapshot().leaderboard == []
-def test_message_at_exact_deadline_is_rejected():
-    engine = make_engine(
-        [
-            Question(
-                question="Capital?",
-                answers=("Paris",),
-            )
-        ]
-    )
-
-    prepare_active_round(
-        engine,
-        start=100.0,
-        deadline=110.0,
-    )
-
-    engine._handle_chat_message(
-        make_message(
-            user_id="u1",
-            received_at=110.0,
-        )
-    )
-
-    assert engine.get_snapshot().leaderboard == []
-
-
-def test_message_before_round_start_is_rejected():
-    engine = make_engine(
-        [
-            Question(
-                question="Capital?",
-                answers=("Paris",),
-            )
-        ]
-    )
-
-    prepare_active_round(
-        engine,
-        start=100.0,
-        deadline=110.0,
-    )
-
-    engine._handle_chat_message(
-        make_message(
-            user_id="u1",
-            received_at=99.999,
-        )
-    )
-
-    assert engine.get_snapshot().leaderboard == []
 
 
 @pytest.mark.asyncio
@@ -191,35 +141,6 @@ async def test_drain_processes_queued_eligible_message():
     assert leaderboard[0]["display_name"] == "Alice"
     assert engine.chat_queue.empty()
 
-def test_one_attempt_per_user_even_when_first_attempt_is_wrong():
-    engine = make_engine(
-        [
-            Question(
-                question="Capital?",
-                answers=("Paris",),
-            )
-        ]
-    )
-
-    prepare_active_round(engine)
-
-    engine._handle_chat_message(
-        make_message(
-            user_id="u1",
-            text="London",
-            received_at=101.0,
-        )
-    )
-
-    engine._handle_chat_message(
-        make_message(
-            user_id="u1",
-            text="Paris",
-            received_at=102.0,
-        )
-    )
-
-    assert engine.get_snapshot().leaderboard == []
 
 def test_one_attempt_per_user_even_when_first_attempt_is_wrong():
     engine = make_engine(
@@ -399,6 +320,7 @@ async def test_engine_first_correct_answer_scores():
 
     await engine.stop()
 
+
 @pytest.mark.asyncio
 async def test_drain_rejects_message_received_at_deadline():
     engine = make_engine(
@@ -429,3 +351,187 @@ async def test_drain_rejects_message_received_at_deadline():
 
     assert engine.get_snapshot().leaderboard == []
     assert engine.chat_queue.empty()
+    
+@pytest.mark.asyncio
+async def test_multiple_questions_require_separate_start_and_finish():
+    engine = TriviaEngine(
+        questions=[
+            Question(
+                question="Capital of France?",
+                answers=("Paris",),
+            ),
+            Question(
+                question="Capital of Japan?",
+                answers=("Tokyo",),
+            ),
+        ],
+        chat_queue=asyncio.Queue(maxsize=100),
+        question_duration_sec=0.05,
+        result_duration_sec=0.01,
+        transition_duration_sec=0.01,
+    )
+
+    engine.start()
+
+    # First question must wait for START.
+    await asyncio.sleep(0.01)
+    assert engine.state == GameState.WAITING_FOR_START
+    assert engine.current_question_index == 0
+
+    # Start question 1.
+    engine.handle_command(
+        GameCommand(
+            command=GameCommandType.START
+        )
+    )
+
+    await asyncio.sleep(0.02)
+    assert engine.state == GameState.ACTIVE
+    assert engine.current_question_index == 0
+
+    # Let question 1 finish.
+    await asyncio.sleep(0.08)
+
+    assert engine.state == GameState.WAITING_FOR_START
+    assert engine.current_question_index == 1
+
+    # Question 2 must NOT start automatically.
+    await asyncio.sleep(0.02)
+    assert engine.state == GameState.WAITING_FOR_START
+
+    # Start question 2.
+    engine.handle_command(
+        GameCommand(
+            command=GameCommandType.START
+        )
+    )
+
+    await asyncio.sleep(0.02)
+    assert engine.state == GameState.ACTIVE
+    assert engine.current_question_index == 1
+
+    # Let question 2 finish.
+    await asyncio.sleep(0.08)
+
+    assert engine.state == GameState.FINISHED
+    assert engine.current_question_index == 2
+
+    await engine.stop()
+    
+@pytest.mark.asyncio
+async def test_stop_during_active_round_shuts_down_cleanly():
+    engine = TriviaEngine(
+        questions=[
+            Question(
+                question="Capital of France?",
+                answers=("Paris",),
+            )
+        ],
+        chat_queue=asyncio.Queue(maxsize=100),
+        question_duration_sec=1.0,
+        result_duration_sec=0.01,
+        transition_duration_sec=0.01,
+    )
+
+    engine.start()
+
+    engine.handle_command(
+        GameCommand(
+            command=GameCommandType.START
+        )
+    )
+
+    await asyncio.sleep(0.02)
+
+    assert engine.state == GameState.ACTIVE
+    assert engine._running is True
+
+    await engine.stop()
+
+    assert engine.state == GameState.STOPPED
+    assert engine._running is False
+
+    assert engine._engine_task is not None
+    assert engine._engine_task.done()
+
+    assert engine._queue_task is not None
+    assert engine._queue_task.done()
+@pytest.mark.asyncio
+async def test_stop_while_waiting_for_start_shuts_down_cleanly():
+    engine = TriviaEngine(
+        questions=[
+            Question(
+                question="Capital of France?",
+                answers=("Paris",),
+            )
+        ],
+        chat_queue=asyncio.Queue(maxsize=100),
+        question_duration_sec=1.0,
+        result_duration_sec=0.01,
+        transition_duration_sec=0.01,
+    )
+
+    engine.start()
+
+    await asyncio.sleep(0.02)
+
+    assert engine.state == GameState.WAITING_FOR_START
+    assert engine._running is True
+
+    await engine.stop()
+
+    assert engine.state == GameState.STOPPED
+    assert engine._running is False
+
+    assert engine._engine_task is not None
+    assert engine._engine_task.done()
+
+    assert engine._queue_task is not None
+    assert engine._queue_task.done()
+    
+@pytest.mark.asyncio
+async def test_stop_during_transition_shuts_down_cleanly():
+    engine = TriviaEngine(
+        questions=[
+            Question(
+                question="Capital of France?",
+                answers=("Paris",),
+            ),
+            Question(
+                question="Capital of Japan?",
+                answers=("Tokyo",),
+            ),
+        ],
+        chat_queue=asyncio.Queue(maxsize=100),
+        question_duration_sec=0.05,
+        result_duration_sec=0.01,
+        transition_duration_sec=0.2,
+    )
+
+    engine.start()
+
+    engine.handle_command(
+        GameCommand(
+            command=GameCommandType.START
+        )
+    )
+
+    for _ in range(100):
+        if engine.state == GameState.TRANSITION:
+            break
+        await asyncio.sleep(0.005)
+
+    assert engine.state == GameState.TRANSITION
+    assert engine._running is True
+    assert engine.current_question_index == 0
+
+    await engine.stop()
+
+    assert engine.state == GameState.STOPPED
+    assert engine._running is False
+
+    assert engine._engine_task is not None
+    assert engine._engine_task.done()
+
+    assert engine._queue_task is not None
+    assert engine._queue_task.done()
