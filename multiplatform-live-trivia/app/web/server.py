@@ -1,77 +1,168 @@
-"""FastAPI Web Server & WebSocket Overlay Broadcast."""
+"""FastAPI web application factory."""
 from __future__ import annotations
 
 import asyncio
 from dataclasses import asdict
 import json
-import logging
 from pathlib import Path
-from typing import Dict, Set
+from typing import Set
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.core.engine import TriviaEngine
-from app.models import GameCommand, GameCommandType, GameSnapshot
+from app.models import (
+    GameCommand,
+    GameCommandType,
+)
 
-logger = logging.getLogger(__name__)
 
+def create_app(
+    engine: TriviaEngine,
+    config: dict,
+) -> FastAPI:
+    app = FastAPI(
+        title="Multiplatform LIVE Trivia"
+    )
 
-def create_app(engine: TriviaEngine, config: dict) -> FastAPI:
-    app = FastAPI(title="Multiplatform Live Trivia Overlay")
+    static_dir = Path("web")
 
-    # Serve static assets if the folder exists
-    static_dir = Path("static")
     if static_dir.is_dir():
-        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+        app.mount(
+            "/static",
+            StaticFiles(
+                directory=str(static_dir)
+            ),
+            name="static",
+        )
 
-    active_websockets: Set[WebSocket] = set()
+    sockets: Set[WebSocket] = set()
 
-    async def broadcast_snapshot(snapshot: GameSnapshot) -> None:
-        if not active_websockets:
-            return
-        data = asdict(snapshot)
-        message = json.dumps(data)
-        to_remove = set()
-        for ws in active_websockets:
-            try:
-                await ws.send_text(message)
-            except Exception:
-                to_remove.add(ws)
-        active_websockets.difference_update(to_remove)
+    async def broadcast_loop():
+        while engine.state.value != "STOPPED":
+            snapshot = engine.get_snapshot()
 
-    def on_snapshot_update(snapshot: GameSnapshot) -> None:
-        asyncio.create_task(broadcast_snapshot(snapshot))
+            payload = json.dumps(
+                asdict(snapshot)
+            )
 
-    engine.snapshot_callback = on_snapshot_update
+            dead = set()
+
+            for ws in sockets:
+                try:
+                    await ws.send_text(
+                        payload
+                    )
+                except Exception:
+                    dead.add(ws)
+
+            sockets.difference_update(dead)
+
+            await asyncio.sleep(0.1)
 
     @app.get("/api/status")
-    async def get_status() -> JSONResponse:
-        return JSONResponse(asdict(engine.get_snapshot()))
+    async def get_status():
+        return JSONResponse(
+            asdict(engine.get_snapshot())
+        )
 
     @app.post("/api/control")
-    async def post_control(payload: Dict[str, str]) -> JSONResponse:
-        action = payload.get("action", "").upper()
+    async def post_control(
+        payload: dict[str, str]
+    ):
+        action = (
+            payload.get("action", "")
+            .upper()
+        )
+
         if action == "START":
-            engine.handle_command(GameCommand(command=GameCommandType.START))
-            return JSONResponse({"status": "ok", "action": "START"})
-        elif action == "STOP":
-            engine.handle_command(GameCommand(command=GameCommandType.STOP))
-            return JSONResponse({"status": "ok", "action": "STOP"})
+            engine.handle_command(
+                GameCommand(
+                    command=GameCommandType.START
+                )
+            )
+
+            return JSONResponse(
+                {
+                    "status": "ok",
+                    "action": "START",
+                }
+            )
+
+        if action == "STOP":
+            engine.handle_command(
+                GameCommand(
+                    command=GameCommandType.STOP
+                )
+            )
+
+            return JSONResponse(
+                {
+                    "status": "ok",
+                    "action": "STOP",
+                }
+            )
+
         return JSONResponse(
-            {"status": "error", "message": f"Unknown action '{action}'"}, status_code=400
+            {
+                "status": "error",
+                "message":
+                    f"Unknown action '{action}'",
+            },
+            status_code=400,
         )
 
     @app.websocket("/ws")
-    async def websocket_endpoint(websocket: WebSocket) -> None:
+    async def websocket_endpoint(
+        websocket: WebSocket,
+    ):
         await websocket.accept()
-        active_websockets.add(websocket)
-        await websocket.send_text(json.dumps(asdict(engine.get_snapshot())))
+
+        sockets.add(websocket)
+
+        await websocket.send_text(
+            json.dumps(
+                asdict(
+                    engine.get_snapshot()
+                )
+            )
+        )
+
         try:
             while True:
                 await websocket.receive_text()
+
         except WebSocketDisconnect:
-            active_websockets.discard(websocket)
+            sockets.discard(websocket)
+
+        except Exception:
+            sockets.discard(websocket)
+
+    @app.on_event("startup")
+    async def startup():
+        engine.start()
+        app.state.broadcast_task = (
+            asyncio.create_task(
+                broadcast_loop()
+            )
+        )
+
+    @app.on_event("shutdown")
+    async def shutdown():
+        task = getattr(
+            app.state,
+            "broadcast_task",
+            None,
+        )
+
+        if task is not None:
+            task.cancel()
+            await asyncio.gather(
+                task,
+                return_exceptions=True,
+            )
+
+        await engine.stop()
 
     return app

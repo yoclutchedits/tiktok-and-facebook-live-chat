@@ -95,7 +95,13 @@ def matches_answer(
 
         # Determine type
         if explicit_type:
-            ans_type = AnswerType[explicit_type.upper()]
+            try:
+                ans_type = AnswerType[explicit_type.upper()]
+            except KeyError:
+                try:
+                    ans_type = AnswerType(explicit_type.lower())
+                except ValueError:
+                    ans_type = classify_answer(expected)
         else:
             ans_type = classify_answer(expected)
 

@@ -1,4 +1,4 @@
-"""Shared data models. No business logic."""
+"""Shared data models."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -49,9 +49,9 @@ class ChatMessage:
     user_id: str
     username: str
     text: str
-    received_at: float  # time.monotonic() captured by adapter
+    received_at: float
     message_id: Optional[str] = None
-    platform_created_at: Optional[datetime] = None  # tz-aware UTC datetime
+    platform_created_at: Optional[datetime] = None
 
 
 @dataclass
@@ -100,3 +100,6 @@ class GameSnapshot:
     queue_capacity: int
     dropped_messages: int
     leaderboard: List[Dict[str, Any]]
+
+    time_remaining: Optional[float] = None
+    correct_answer: Optional[str] = None
