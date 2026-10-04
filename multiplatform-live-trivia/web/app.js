@@ -13,6 +13,7 @@
   const stateBadge = document.getElementById("state-badge");
   const questionCount = document.getElementById("question-count");
   const questionBox = document.getElementById("question-box");
+  const optionsBox = document.getElementById("options-box");
   const answerReveal = document.getElementById("answer-reveal");
   const timerBar = document.getElementById("timer-bar");
   const timerDigits = document.getElementById("timer-digits");
@@ -102,14 +103,24 @@
       questionBox.textContent =
         "Game Complete!";
     }
-
+    renderOptions(snap);
     if (
       snap.state === "RESULT" &&
       snap.correct_answer
     ) {
       answerReveal.style.display = "block";
-      answerReveal.textContent =
+      let answerText =
         `Correct Answer: ${snap.correct_answer}`;
+
+      if (
+        snap.options &&
+        snap.options[snap.correct_answer]
+      ) {
+        answerText +=
+          `. ${snap.options[snap.correct_answer]}`;
+      }
+
+      answerReveal.textContent = answerText;
     } else {
       answerReveal.style.display = "none";
     }
@@ -321,6 +332,40 @@
   }
 
 
+function renderOptions(snap) {
+  if (!optionsBox) {
+    return;
+  }
+
+  optionsBox.replaceChildren();
+
+  if (
+    !snap.options ||
+    typeof snap.options !== "object" ||
+    Object.keys(snap.options).length === 0
+  ) {
+    optionsBox.style.display = "none";
+    return;
+  }
+
+  optionsBox.style.display = "grid";
+
+  for (const [label, text] of Object.entries(snap.options)) {
+    const option = document.createElement("div");
+    option.className = "mcq-option";
+
+    const optionLabel = document.createElement("span");
+    optionLabel.className = "mcq-option-label";
+    optionLabel.textContent = label;
+
+    const optionText = document.createElement("span");
+    optionText.className = "mcq-option-text";
+    optionText.textContent = text;
+
+    option.append(optionLabel, optionText);
+    optionsBox.appendChild(option);
+  }
+}
 
   function updatePlatformTelemetry(platforms) {
     if (

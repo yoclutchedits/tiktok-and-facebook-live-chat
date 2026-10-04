@@ -17,6 +17,7 @@ class AnswerType(str, Enum):
     NUMBER = "number"
     NUMBERED_TEXT = "numbered_text"
     ROMAN_NUMERAL = "roman_numeral"
+    MCQ = "mcq"
 
 
 class GameState(str, Enum):
@@ -73,6 +74,7 @@ class Question:
     question: str
     answers: Tuple[str, ...]
     answer_type: Optional[AnswerType] = None
+    options: Tuple[Tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -86,7 +88,6 @@ class PlatformStatus:
     state: PlatformStatusType = PlatformStatusType.DISABLED
     detail: str = ""
     reconnect_attempts: int = 0
-
 
 @dataclass
 class GameSnapshot:
@@ -103,3 +104,4 @@ class GameSnapshot:
 
     time_remaining: Optional[float] = None
     correct_answer: Optional[str] = None
+    options: Optional[Dict[str, str]] = None

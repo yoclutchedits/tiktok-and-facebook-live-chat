@@ -402,10 +402,14 @@ class TriviaEngine:
     def get_snapshot(self) -> GameSnapshot:
         current_question = None
         correct_answer = None
+        options = None
 
         if 0 <= self.current_question_index < len(self.questions):
             q = self.questions[self.current_question_index]
             current_question = q.question
+
+            if q.options:
+                options = dict(q.options)
 
             if self.state in (
                 GameState.RESULT,
@@ -444,6 +448,7 @@ class TriviaEngine:
             leaderboard=self.leaderboard_mgr.get_leaderboard(),
             correct_answer=correct_answer,
             time_remaining=time_remaining,
+            options=options,
         )
 
     def _notify_snapshot(self) -> None:

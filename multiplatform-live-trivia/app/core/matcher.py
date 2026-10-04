@@ -19,7 +19,7 @@ class AnswerType(Enum):
     NUMBER = auto()
     NUMBERED_TEXT = auto()
     ROMAN_NUMERAL = auto()
-
+    MCQ = auto()
 
 def normalize_text(text: str) -> str:
     """Unicode normalize, casefold, strip punctuation and whitespace."""
@@ -112,8 +112,17 @@ def matches_answer(
             if user_dec is not None and exp_dec is not None and user_dec == exp_dec:
                 return True
             continue
+        # 2. MCQ answers are strict exact matches.
+        if ans_type == AnswerType.MCQ:
+            strip_user = re.sub(r"[^\w\s]", "", norm_user)
+            strip_exp = re.sub(r"[^\w\s]", "", norm_expected)
 
-        # 2. Numbered Text & Roman Numerals (Strict exact match, NO fuzzy)
+            if strip_user.upper() == strip_exp.upper():
+                return True
+
+            continue
+
+        # 3. Numbered Text & Roman Numerals (Strict exact match, NO fuzzy)
         if ans_type in (AnswerType.NUMBERED_TEXT, AnswerType.ROMAN_NUMERAL):
             strip_user = re.sub(r"[^\w\s]", "", norm_user)
             strip_exp = re.sub(r"[^\w\s]", "", norm_expected)
@@ -121,11 +130,11 @@ def matches_answer(
                 return True
             continue
 
-        # 3. Short Answer Protection (1-3 chars must match exactly)
+        # 4. Short Answer Protection (1-3 chars must match exactly)
         if len(norm_expected) <= 3:
             continue
 
-        # 4. Fuzzy Text Matching (rapidfuzz.fuzz.ratio ONLY)
+        # 5. Fuzzy Text Matching (rapidfuzz.fuzz.ratio ONLY)
         similarity = fuzz.ratio(norm_user, norm_expected)
         if similarity >= fuzzy_threshold:
             return True
