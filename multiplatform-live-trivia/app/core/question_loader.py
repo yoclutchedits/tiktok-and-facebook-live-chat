@@ -133,14 +133,24 @@ def validate_and_parse_questions(raw_data: List[dict[str, Any]]) -> List[Questio
                 options.append((label_str, option_text_str))
 
             option_labels = {
-                label for label, _ in options
+                label.upper()
+                for label, _ in options
+            }
+
+            option_texts = {
+                normalize_text(text)
+                for _, text in options
             }
 
             for answer in clean_answers:
-                if answer.upper() not in option_labels:
+                if (
+                    answer.upper() not in option_labels
+                    and normalize_text(answer) not in option_texts
+                ):
                     raise ValueError(
                         f"MCQ correct answer '{answer}' does not match "
-                        f"an option label for question '{q_text_str}'"
+                        f"an option label or option text for question "
+                        f"'{q_text_str}'"
                     )
 
         questions.append(
