@@ -1,15 +1,14 @@
-
-"""Facebook LIVE polling adapter."""
+"""Facebook LIVE chat adapter using Social Stream Ninja."""
 from __future__ import annotations
 
 import asyncio
 from collections import deque
-from datetime import datetime, timezone
+import json
 import logging
 import time
-from typing import Optional, Set
+from typing import Any, Optional, Set
 
-import httpx
+import websockets
 
 from app.models import (
     ChatMessage,
@@ -22,18 +21,20 @@ logger = logging.getLogger(__name__)
 
 
 class FacebookAdapter:
+    """
+    Receives Facebook LIVE chat through Social Stream Ninja.
+
+    Social Stream Ninja sends chat messages over WebSocket channel 4.
+    """
+
     def __init__(
         self,
-        access_token: str,
-        live_video_id: str,
+        session_id: str,
         chat_queue: asyncio.Queue,
-        poll_interval_ms: int = 500,
         status_callback=None,
     ) -> None:
-        self.access_token = access_token.strip()
-        self.live_video_id = live_video_id.strip()
+        self.session_id = session_id.strip()
         self.chat_queue = chat_queue
-        self.poll_interval = poll_interval_ms / 1000.0
         self.status_callback = status_callback
 
         self.status = PlatformStatus(
@@ -61,7 +62,9 @@ class FacebookAdapter:
             try:
                 self.status_callback(self.status)
             except Exception:
-                logger.exception("Facebook status callback failed.")
+                logger.exception(
+                    "Facebook status callback failed."
+                )
 
     def _mark_seen(self, message_id: str) -> bool:
         if message_id in self.seen_message_ids:
@@ -76,112 +79,177 @@ class FacebookAdapter:
 
         return True
 
+    @staticmethod
+    def _unwrap_message(data: Any) -> dict[str, Any] | None:
+        """
+        Social Stream Ninja payloads can be wrapped.
+
+        Try the common wrapper shapes and return the actual
+        message object.
+        """
+        if not isinstance(data, dict):
+            return None
+
+        if (
+            "chatname" in data
+            or "chatmessage" in data
+            or "userid" in data
+        ):
+            return data
+
+        for key in ("data", "message", "value", "payload"):
+            nested = data.get(key)
+
+            if isinstance(nested, dict):
+                result = FacebookAdapter._unwrap_message(nested)
+
+                if result is not None:
+                    return result
+
+            elif isinstance(nested, str):
+                try:
+                    decoded = json.loads(nested)
+                except (TypeError, ValueError):
+                    continue
+
+                result = FacebookAdapter._unwrap_message(decoded)
+
+                if result is not None:
+                    return result
+
+        return None
+
+    @staticmethod
+    def _extract_text(data: dict[str, Any]) -> str:
+        """
+        Prefer plain text metadata when Social Stream Ninja provides it.
+
+        chatmessage may contain HTML/emote markup.
+        """
+        meta = data.get("meta")
+
+        if isinstance(meta, dict):
+            plain_text = meta.get("plainText")
+
+            if plain_text is not None:
+                return str(plain_text).strip()
+
+        return str(
+            data.get("chatmessage")
+            or data.get("message")
+            or ""
+        ).strip()
+
     async def start(self) -> None:
         if self._running:
             return
 
-        if not self.access_token or not self.live_video_id:
+        if not self.session_id:
             self._update_status(
                 PlatformStatusType.DISABLED,
-                "Missing access token or live_video_id",
+                "Social Stream Ninja session_id not configured",
             )
             return
 
         self._running = True
-        self._task = asyncio.create_task(self._poll_loop())
 
-    async def _poll_loop(self) -> None:
-        self._update_status(
-            PlatformStatusType.CONNECTING,
-            "Connecting to Facebook LIVE...",
+        self._task = asyncio.create_task(
+            self._listen_loop()
         )
 
-        url = (
-            f"https://graph.facebook.com/v26.0/"
-            f"{self.live_video_id}/comments"
+    async def _listen_loop(self) -> None:
+        uri = (
+            "wss://io.socialstream.ninja/join/"
+            f"{self.session_id}/4"
         )
 
-        params = {
-            "access_token": self.access_token,
-            "fields": "id,from,message,created_time",
-            "order": "reverse_chronological",
-        }
+        while self._running:
+            try:
+                self._update_status(
+                    PlatformStatusType.CONNECTING,
+                    "Connecting to Social Stream Ninja...",
+                )
 
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            while self._running:
-                try:
-                    response = await client.get(
-                        url,
-                        params=params,
-                    )
-
-                    if response.status_code != 200:
-                        self.status.reconnect_attempts += 1
-
-                        body = response.text[:500]
-
-                        self._update_status(
-                            PlatformStatusType.DISCONNECTED,
-                            f"HTTP {response.status_code}: {body}",
-                        )
-
-                        await asyncio.sleep(self.poll_interval)
-                        continue
+                async with websockets.connect(
+                    uri,
+                    ping_interval=20,
+                    ping_timeout=20,
+                    close_timeout=5,
+                ) as websocket:
+                    if not self._running:
+                        break
 
                     self._update_status(
                         PlatformStatusType.CONNECTED,
-                        f"Polling Video ID: {self.live_video_id}",
+                        "Facebook chat connected via Social Stream Ninja",
                     )
 
-                    data = response.json().get("data", [])
+                    logger.info(
+                        "Facebook chat connected through "
+                        "Social Stream Ninja session %s.",
+                        self.session_id,
+                    )
 
-                    # Process comments from oldest to newest.
-                    for item in reversed(data):
-                        message_id = item.get("id")
+                    async for raw_message in websocket:
+                        if not self._running:
+                            break
 
-                        if not message_id:
+                        try:
+                            data = json.loads(raw_message)
+                        except (TypeError, ValueError):
+                            logger.warning(
+                                "Ignoring invalid Social Stream "
+                                "JSON message."
+                            )
                             continue
 
-                        message_id = str(message_id)
+                        message_data = self._unwrap_message(data)
 
-                        # Skip comments already queued successfully.
-                        # Do not mark a new comment as seen yet.
-                        if message_id in self.seen_message_ids:
+                        if message_data is None:
                             continue
 
-                        user_data = item.get("from") or {}
+                        # Only accept Facebook chat.
+                        source_type = str(
+                            message_data.get("type")
+                            or message_data.get("platform")
+                            or ""
+                        ).strip().lower()
+
+                        if source_type and source_type != "facebook":
+                            continue
+
+                        text = self._extract_text(message_data)
+
+                        if not text:
+                            continue
+
+                        message_id_raw = (
+                            message_data.get("id")
+                            or message_data.get("message_id")
+                        )
+
+                        if message_id_raw is not None:
+                            message_id = str(message_id_raw)
+
+                            if not self._mark_seen(message_id):
+                                continue
+                        else:
+                            message_id = None
 
                         user_id = str(
-                            user_data.get("id") or "unknown"
+                            message_data.get("userid")
+                            or message_data.get("user_id")
+                            or message_data.get("username")
+                            or message_data.get("chatname")
+                            or "unknown"
                         )
 
                         username = str(
-                            user_data.get("name") or user_id
+                            message_data.get("username")
+                            or message_data.get("chatname")
+                            or user_id
                         )
 
-                        text = str(item.get("message") or "")
-
-                        created_at: Optional[datetime] = None
-                        created_str = item.get("created_time")
-
-                        if created_str:
-                            try:
-                                created_at = datetime.fromisoformat(
-                                    created_str.replace("Z", "+00:00")
-                                )
-
-                                if created_at.tzinfo is None:
-                                    created_at = created_at.replace(
-                                        tzinfo=timezone.utc
-                                    )
-
-                            except ValueError:
-                                logger.warning(
-                                    "Could not parse Facebook created_time: %r",
-                                    created_str,
-                                )
-
-                        # Capture receipt time when this comment is processed.
                         received_at = time.monotonic()
 
                         message = ChatMessage(
@@ -191,42 +259,48 @@ class FacebookAdapter:
                             text=text,
                             received_at=received_at,
                             message_id=message_id,
-                            platform_created_at=created_at,
                         )
 
                         try:
-                            # Enqueue first. Mark as seen only if enqueue
-                            # succeeds, allowing full-queue comments to retry.
-                            self.chat_queue.put_nowait(message)
-                            self._mark_seen(message_id)
+                            self.chat_queue.put_nowait(
+                                message
+                            )
 
                         except asyncio.QueueFull:
                             self.dropped_messages += 1
 
                             logger.warning(
-                                "Facebook chat queue full; comment %s "
-                                "will be retried on a later poll "
-                                "(total queue-full events: %d)",
-                                message_id,
+                                "Facebook chat queue full; "
+                                "dropped message from %s "
+                                "(total dropped: %d)",
+                                username,
                                 self.dropped_messages,
                             )
 
-                except asyncio.CancelledError:
-                    raise
+            except asyncio.CancelledError:
+                raise
 
-                except Exception:
-                    self.status.reconnect_attempts += 1
+            except Exception as exc:
+                if not self._running:
+                    break
 
-                    self._update_status(
-                        PlatformStatusType.DISCONNECTED,
-                        "Polling error",
-                    )
+                self.status.reconnect_attempts += 1
 
-                    logger.exception(
-                        "Error polling Facebook LIVE comments."
-                    )
+                self._update_status(
+                    PlatformStatusType.DISCONNECTED,
+                    f"Social Stream Ninja error: {exc}",
+                )
 
-                await asyncio.sleep(self.poll_interval)
+                logger.exception(
+                    "Facebook Social Stream Ninja connection failed."
+                )
+
+                await asyncio.sleep(3)
+
+        self._update_status(
+            PlatformStatusType.DISCONNECTED,
+            "Facebook chat listener stopped",
+        )
 
     async def stop(self) -> None:
         self._running = False

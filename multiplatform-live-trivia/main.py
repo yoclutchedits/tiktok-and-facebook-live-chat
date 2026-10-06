@@ -6,7 +6,6 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict
 import json
 import logging
-import os
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -221,26 +220,18 @@ async def lifespan(app: FastAPI):
 
     facebook_adapter: FacebookAdapter | None = None
 
-    facebook_token = os.getenv(
-        "FACEBOOK_ACCESS_TOKEN",
-        "",
+    facebook_session_id = (
+        fb_cfg.get("session_id", "")
+        or ""
     ).strip()
 
     if (
         fb_cfg.get("enabled", True)
-        and facebook_token
-        and fb_cfg.get("live_video_id", "").strip()
+        and facebook_session_id
     ):
         facebook_adapter = FacebookAdapter(
-            access_token=facebook_token,
-            live_video_id=fb_cfg["live_video_id"],
+            session_id=facebook_session_id,
             chat_queue=chat_queue,
-            poll_interval_ms=int(
-                fb_cfg.get(
-                    "poll_interval_ms",
-                    500,
-                )
-            ),
         )
 
     # --------------------------------------------------------------
