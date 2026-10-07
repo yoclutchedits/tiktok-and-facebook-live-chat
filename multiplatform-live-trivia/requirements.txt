@@ -3,7 +3,6 @@ rapidfuzz
 fastapi
 uvicorn[standard]
 httpx
-pynput
 python-dotenv
 pytest
 pytest-asyncio

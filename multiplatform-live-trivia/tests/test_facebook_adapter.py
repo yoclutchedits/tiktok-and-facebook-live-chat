@@ -1,52 +1,18 @@
+"""Tests for the current Social Stream Ninja Facebook adapter."""
 
 import asyncio
+import json
 
 import pytest
 
 import app.integrations.facebook as facebook_module
 from app.integrations.facebook import FacebookAdapter
-from app.models import ChatMessage
 
 
-class QueueFullOnce(asyncio.Queue):
-    """Simulate a full queue once, then allow the retry."""
-
-    def __init__(self):
-        super().__init__()
-        self.failed_once = False
-
-    def put_nowait(self, item):
-        if not self.failed_once:
-            self.failed_once = True
-            raise asyncio.QueueFull
-
-        return super().put_nowait(item)
-
-
-class FakeResponse:
-    status_code = 200
-    text = ""
-
-    def json(self):
-        return {
-            "data": [
-                {
-                    "id": "comment-123",
-                    "from": {
-                        "id": "user-1",
-                        "name": "Test User",
-                    },
-                    "message": "London",
-                    "created_time": "2026-10-03T10:00:00Z",
-                }
-            ]
-        }
-
-
-class FakeAsyncClient:
-    def __init__(self, adapter):
+class FakeWebSocket:
+    def __init__(self, messages, adapter):
+        self._messages = iter(messages)
         self.adapter = adapter
-        self.calls = 0
 
     async def __aenter__(self):
         return self
@@ -54,199 +20,271 @@ class FakeAsyncClient:
     async def __aexit__(self, exc_type, exc, tb):
         return False
 
-    async def get(self, url, params):
-        self.calls += 1
+    def __aiter__(self):
+        return self
 
-        # Stop after returning the second response. The second response
-        # should retry the comment that failed to enqueue on the first.
-        if self.calls == 2:
+    async def __anext__(self):
+        try:
+            return next(self._messages)
+        except StopIteration:
             self.adapter._running = False
+            raise StopAsyncIteration
 
-        return FakeResponse()
+
+class FakeConnect:
+    def __init__(self, websocket):
+        self.websocket = websocket
+
+    async def __aenter__(self):
+        return self.websocket
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class QueueFullOnce(asyncio.Queue):
+    """Fail the first enqueue, then allow later enqueues."""
+
+    def __init__(self):
+        super().__init__(maxsize=10)
+        self.failed_once = False
+
+    def put_nowait(self, item):
+        if not self.failed_once:
+            self.failed_once = True
+            raise asyncio.QueueFull
+        return super().put_nowait(item)
+
+
+def facebook_payload(
+    *,
+    message_id="comment-1",
+    text="Paris",
+    user_id="user-1",
+    username="Test User",
+):
+    return json.dumps(
+        {
+            "type": "facebook",
+            "id": message_id,
+            "userid": user_id,
+            "chatname": username,
+            "chatmessage": text,
+            "meta": {
+                "plainText": text,
+            },
+        }
+    )
 
 
 @pytest.mark.asyncio
-async def test_facebook_retries_comment_when_queue_is_full(monkeypatch):
-    queue = QueueFullOnce()
-
-    adapter = FacebookAdapter(
-        access_token="test-token",
-        live_video_id="test-live-id",
-        chat_queue=queue,
-        poll_interval_ms=0,
-    )
-
-    fake_client = FakeAsyncClient(adapter)
-
-    monkeypatch.setattr(
-        facebook_module.httpx,
-        "AsyncClient",
-        lambda **kwargs: fake_client,
-    )
-
-    adapter._running = True
-    await adapter._poll_loop()
-
-    # The first enqueue failed, but the next poll successfully retried it.
-    assert fake_client.calls == 2
-    assert adapter.dropped_messages == 1
-    assert "comment-123" in adapter.seen_message_ids
-
-    message = queue.get_nowait()
-    assert message.message_id == "comment-123"
-    assert message.text == "London"
-    assert queue.empty()
-@pytest.mark.asyncio
-async def test_facebook_recovers_from_temporary_polling_error(monkeypatch):
+async def test_facebook_message_reaches_queue(monkeypatch):
     queue = asyncio.Queue(maxsize=10)
 
     adapter = FacebookAdapter(
-        access_token="test-token",
-        live_video_id="test-live-id",
+        session_id="test-session",
         chat_queue=queue,
-        poll_interval_ms=0,
     )
 
-    class TemporaryFailureClient:
-        def __init__(self):
-            self.calls = 0
+    messages = [
+        json.dumps(
+            {
+                "type": "tiktok",
+                "userid": "ignored-user",
+                "chatname": "Ignored",
+                "chatmessage": "ignore me",
+            }
+        ),
+        facebook_payload(
+            text="TRIVIA_TEST_123",
+            user_id="facebook-user-1",
+            username="Facebook User",
+        ),
+    ]
 
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        async def get(self, url, params):
-            self.calls += 1
-
-            if self.calls == 1:
-                raise RuntimeError("temporary Facebook API failure")
-
-            self.adapter._running = False
-
-            return FakeResponse()
-
-    fake_client = TemporaryFailureClient()
-    fake_client.adapter = adapter
+    websocket = FakeWebSocket(messages, adapter)
 
     monkeypatch.setattr(
-        facebook_module.httpx,
-        "AsyncClient",
-        lambda **kwargs: fake_client,
+        facebook_module.websockets,
+        "connect",
+        lambda *args, **kwargs: FakeConnect(websocket),
+    )
+
+    adapter._running = True
+    await adapter._listen_loop()
+
+    assert queue.qsize() == 1
+
+    message = queue.get_nowait()
+
+    assert message.platform == "facebook"
+    assert message.user_id == "facebook-user-1"
+    assert message.username == "Facebook User"
+    assert message.text == "TRIVIA_TEST_123"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_message_id_is_ignored(monkeypatch):
+    queue = asyncio.Queue(maxsize=10)
+
+    adapter = FacebookAdapter(
+        session_id="test-session",
+        chat_queue=queue,
+    )
+
+    payload = facebook_payload(
+        message_id="duplicate-123",
+        text="Paris",
+    )
+
+    websocket = FakeWebSocket(
+        [payload, payload],
+        adapter,
+    )
+
+    monkeypatch.setattr(
+        facebook_module.websockets,
+        "connect",
+        lambda *args, **kwargs: FakeConnect(websocket),
+    )
+
+    adapter._running = True
+    await adapter._listen_loop()
+
+    assert queue.qsize() == 1
+    assert "duplicate-123" in adapter.seen_message_ids
+
+    queue.get_nowait()
+
+
+@pytest.mark.asyncio
+async def test_queue_full_does_not_permanently_mark_message_seen(
+    monkeypatch,
+):
+    queue = QueueFullOnce()
+
+    adapter = FacebookAdapter(
+        session_id="test-session",
+        chat_queue=queue,
+    )
+
+    payload = facebook_payload(
+        message_id="retry-123",
+        text="Paris",
+    )
+
+    websocket = FakeWebSocket(
+        [payload, payload],
+        adapter,
+    )
+
+    monkeypatch.setattr(
+        facebook_module.websockets,
+        "connect",
+        lambda *args, **kwargs: FakeConnect(websocket),
+    )
+
+    adapter._running = True
+    await adapter._listen_loop()
+
+    assert adapter.dropped_messages == 1
+    assert "retry-123" in adapter.seen_message_ids
+    assert queue.qsize() == 1
+
+    message = queue.get_nowait()
+
+    assert message.message_id == "retry-123"
+    assert message.text == "Paris"
+
+
+@pytest.mark.asyncio
+async def test_reconnects_after_connection_refused(monkeypatch):
+    queue = asyncio.Queue(maxsize=10)
+
+    adapter = FacebookAdapter(
+        session_id="test-session",
+        chat_queue=queue,
+    )
+
+    connect_calls = 0
+    states = []
+
+    def record_status(status):
+        states.append(status.state.value)
+
+    adapter.status_callback = record_status
+
+    def fake_connect(*args, **kwargs):
+        nonlocal connect_calls
+
+        connect_calls += 1
+
+        if connect_calls == 1:
+            raise ConnectionRefusedError(
+                111,
+                "Connection refused",
+            )
+
+        websocket = FakeWebSocket([], adapter)
+        return FakeConnect(websocket)
+
+    async def fake_sleep(_delay):
+        pass
+
+    monkeypatch.setattr(
+        facebook_module.websockets,
+        "connect",
+        fake_connect,
+    )
+
+    monkeypatch.setattr(
+        facebook_module.asyncio,
+        "sleep",
+        fake_sleep,
     )
 
     adapter._running = True
 
-    await adapter._poll_loop()
+    await adapter._listen_loop()
 
-    assert fake_client.calls == 2
+    assert connect_calls == 2
     assert adapter.status.reconnect_attempts == 1
-    assert adapter.status.state.value == "CONNECTED"
-    
-import time
-from types import SimpleNamespace
 
-from app.core.engine import TriviaEngine
-from app.integrations.tiktok import TikTokAdapter
-from app.models import (
-    GameCommand,
-    GameCommandType,
-    Question,
-)
+    assert "DISCONNECTED" in states
+    assert "CONNECTED" in states
 
 
 @pytest.mark.asyncio
-async def test_facebook_failure_does_not_stop_tiktok_gameplay(
-    monkeypatch,
-):
-    queue = asyncio.Queue(maxsize=100)
+async def test_invalid_json_is_ignored(monkeypatch):
+    queue = asyncio.Queue(maxsize=10)
 
-    engine = TriviaEngine(
-        questions=[
-            Question(
-                question="Capital of France?",
-                answers=("Paris",),
-            )
+    adapter = FacebookAdapter(
+        session_id="test-session",
+        chat_queue=queue,
+    )
+
+    websocket = FakeWebSocket(
+        [
+            "this is not json",
+            facebook_payload(
+                message_id="valid-1",
+                text="Paris",
+            ),
         ],
-        chat_queue=queue,
-        question_duration_sec=1.0,
-        result_duration_sec=0.01,
-        transition_duration_sec=0.01,
+        adapter,
     )
-
-    tiktok = TikTokAdapter(
-        username="test_creator",
-        chat_queue=queue,
-    )
-
-    facebook = FacebookAdapter(
-        access_token="test-token",
-        live_video_id="test-live-id",
-        chat_queue=queue,
-        poll_interval_ms=0,
-    )
-
-    class FailingFacebookClient:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        async def get(self, url, params):
-            facebook._running = False
-            raise RuntimeError("Facebook temporarily disconnected")
 
     monkeypatch.setattr(
-        facebook_module.httpx,
-        "AsyncClient",
-        lambda **kwargs: FailingFacebookClient(),
+        facebook_module.websockets,
+        "connect",
+        lambda *args, **kwargs: FakeConnect(websocket),
     )
 
-    engine.start()
+    adapter._running = True
+    await adapter._listen_loop()
 
-    engine.handle_command(
-        GameCommand(
-            command=GameCommandType.START
-        )
-    )
+    assert queue.qsize() == 1
 
-    await asyncio.sleep(0.05)
+    message = queue.get_nowait()
 
-    assert engine.state.value == "ACTIVE"
-
-    facebook._running = True
-
-    await facebook._poll_loop()
-
-    assert facebook.status.reconnect_attempts == 1
-
-    user = SimpleNamespace(
-        user_id="tiktok-user-1",
-        nickname="Alice",
-        unique_id="alice",
-    )
-
-    comment_event = SimpleNamespace(
-        user=user,
-        comment="Paris",
-        comment_id="comment-1",
-    )
-
-    await tiktok._on_comment(comment_event)
-
-    for _ in range(20):
-        leaderboard = engine.get_snapshot().leaderboard
-
-        if leaderboard:
-            break
-
-        await asyncio.sleep(0.01)
-
-    assert len(leaderboard) == 1
-    assert leaderboard[0]["display_name"] == "Alice"
-    assert leaderboard[0]["score"] == 1
-    assert engine._running is True
-
-    await engine.stop()
+    assert message.text == "Paris"

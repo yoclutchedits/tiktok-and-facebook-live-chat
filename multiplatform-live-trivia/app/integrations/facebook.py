@@ -67,6 +67,11 @@ class FacebookAdapter:
                 )
 
     def _mark_seen(self, message_id: str) -> bool:
+        """
+        Record a message ID as seen.
+
+        Returns False if the ID has already been seen.
+        """
         if message_id in self.seen_message_ids:
             return False
 
@@ -80,11 +85,13 @@ class FacebookAdapter:
         return True
 
     @staticmethod
-    def _unwrap_message(data: Any) -> dict[str, Any] | None:
+    def _unwrap_message(
+        data: Any,
+    ) -> dict[str, Any] | None:
         """
         Social Stream Ninja payloads can be wrapped.
 
-        Try the common wrapper shapes and return the actual
+        Try common wrapper shapes and return the actual
         message object.
         """
         if not isinstance(data, dict):
@@ -97,11 +104,18 @@ class FacebookAdapter:
         ):
             return data
 
-        for key in ("data", "message", "value", "payload"):
+        for key in (
+            "data",
+            "message",
+            "value",
+            "payload",
+        ):
             nested = data.get(key)
 
             if isinstance(nested, dict):
-                result = FacebookAdapter._unwrap_message(nested)
+                result = FacebookAdapter._unwrap_message(
+                    nested
+                )
 
                 if result is not None:
                     return result
@@ -112,7 +126,9 @@ class FacebookAdapter:
                 except (TypeError, ValueError):
                     continue
 
-                result = FacebookAdapter._unwrap_message(decoded)
+                result = FacebookAdapter._unwrap_message(
+                    decoded
+                )
 
                 if result is not None:
                     return result
@@ -120,9 +136,12 @@ class FacebookAdapter:
         return None
 
     @staticmethod
-    def _extract_text(data: dict[str, Any]) -> str:
+    def _extract_text(
+        data: dict[str, Any],
+    ) -> str:
         """
-        Prefer plain text metadata when Social Stream Ninja provides it.
+        Prefer plain text metadata when Social Stream Ninja
+        provides it.
 
         chatmessage may contain HTML/emote markup.
         """
@@ -141,6 +160,7 @@ class FacebookAdapter:
         ).strip()
 
     async def start(self) -> None:
+        """Start the Facebook chat listener."""
         if self._running:
             return
 
@@ -158,6 +178,10 @@ class FacebookAdapter:
         )
 
     async def _listen_loop(self) -> None:
+        """
+        Connect to Social Stream Ninja Channel 4 and
+        continuously receive Facebook chat messages.
+        """
         uri = (
             "wss://io.socialstream.ninja/join/"
             f"{self.session_id}/4"
@@ -176,6 +200,7 @@ class FacebookAdapter:
                     ping_timeout=20,
                     close_timeout=5,
                 ) as websocket:
+
                     if not self._running:
                         break
 
@@ -194,34 +219,72 @@ class FacebookAdapter:
                         if not self._running:
                             break
 
+                        # --------------------------------------------------
+                        # Decode JSON
+                        # --------------------------------------------------
+
                         try:
-                            data = json.loads(raw_message)
-                        except (TypeError, ValueError):
+                            data = json.loads(
+                                raw_message
+                            )
+                        except (
+                            TypeError,
+                            ValueError,
+                        ):
                             logger.warning(
                                 "Ignoring invalid Social Stream "
                                 "JSON message."
                             )
                             continue
 
-                        message_data = self._unwrap_message(data)
+                        # --------------------------------------------------
+                        # Unwrap message
+                        # --------------------------------------------------
+
+                        message_data = (
+                            self._unwrap_message(data)
+                        )
 
                         if message_data is None:
                             continue
 
-                        # Only accept Facebook chat.
+                        # --------------------------------------------------
+                        # Only accept Facebook messages
+                        # --------------------------------------------------
+
                         source_type = str(
                             message_data.get("type")
                             or message_data.get("platform")
                             or ""
                         ).strip().lower()
 
-                        if source_type and source_type != "facebook":
+                        if (
+                            source_type
+                            and source_type != "facebook"
+                        ):
                             continue
 
-                        text = self._extract_text(message_data)
+                        # --------------------------------------------------
+                        # Extract comment text
+                        # --------------------------------------------------
+
+                        text = self._extract_text(
+                            message_data
+                        )
 
                         if not text:
                             continue
+
+                        # --------------------------------------------------
+                        # Message ID / duplicate detection
+                        #
+                        # IMPORTANT:
+                        # We only MARK the message as seen AFTER
+                        # it successfully enters the queue.
+                        #
+                        # This prevents a QueueFull event from
+                        # permanently losing the message.
+                        # --------------------------------------------------
 
                         message_id_raw = (
                             message_data.get("id")
@@ -229,12 +292,21 @@ class FacebookAdapter:
                         )
 
                         if message_id_raw is not None:
-                            message_id = str(message_id_raw)
+                            message_id = str(
+                                message_id_raw
+                            )
 
-                            if not self._mark_seen(message_id):
+                            if (
+                                message_id
+                                in self.seen_message_ids
+                            ):
                                 continue
                         else:
                             message_id = None
+
+                        # --------------------------------------------------
+                        # User information
+                        # --------------------------------------------------
 
                         user_id = str(
                             message_data.get("userid")
@@ -250,10 +322,20 @@ class FacebookAdapter:
                             or user_id
                         )
 
+                        # --------------------------------------------------
+                        # Local receive timestamp
+                        # --------------------------------------------------
+
                         received_at = time.monotonic()
 
+                        # --------------------------------------------------
+                        # Build shared chat message
+                        # --------------------------------------------------
+
                         message = ChatMessage(
-                            platform=Platform.FACEBOOK.value,
+                            platform=(
+                                Platform.FACEBOOK.value
+                            ),
                             user_id=user_id,
                             username=username,
                             text=text,
@@ -261,10 +343,21 @@ class FacebookAdapter:
                             message_id=message_id,
                         )
 
+                        # --------------------------------------------------
+                        # Put message into shared queue
+                        # --------------------------------------------------
+
                         try:
                             self.chat_queue.put_nowait(
                                 message
                             )
+
+                            # Mark as seen ONLY after queue insertion
+                            # succeeds.
+                            if message_id is not None:
+                                self._mark_seen(
+                                    message_id
+                                )
 
                         except asyncio.QueueFull:
                             self.dropped_messages += 1
@@ -277,8 +370,16 @@ class FacebookAdapter:
                                 self.dropped_messages,
                             )
 
+            # --------------------------------------------------------------
+            # Normal cancellation
+            # --------------------------------------------------------------
+
             except asyncio.CancelledError:
                 raise
+
+            # --------------------------------------------------------------
+            # Connection failure
+            # --------------------------------------------------------------
 
             except Exception as exc:
                 if not self._running:
@@ -295,14 +396,17 @@ class FacebookAdapter:
                     "Facebook Social Stream Ninja connection failed."
                 )
 
+                # Wait before reconnecting.
                 await asyncio.sleep(3)
 
+        # Listener has stopped.
         self._update_status(
             PlatformStatusType.DISCONNECTED,
             "Facebook chat listener stopped",
         )
 
     async def stop(self) -> None:
+        """Stop the Facebook chat listener cleanly."""
         self._running = False
 
         if self._task is not None:
