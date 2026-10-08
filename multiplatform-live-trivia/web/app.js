@@ -35,11 +35,11 @@
   const timerDigits =
     document.getElementById("timer-digits");
 
-  const leaderboardList =
-    document.getElementById("leaderboard-list");
+  const tiktokLeaderboardList =
+    document.getElementById("tiktok-leaderboard-list");
 
-  const leaderboardTitle =
-    document.getElementById("leaderboard-title");
+  const facebookLeaderboardList =
+    document.getElementById("facebook-leaderboard-list");
 
   const btnStart =
     document.getElementById("btn-start");
@@ -454,185 +454,160 @@
   // --------------------------------------------------------------------------
 
   function renderLeaderboard(snap) {
-    if (!leaderboardList) {
-      return;
-    }
+  const isFinal =
+    snap.state === "FINISHED";
 
-    const isFinal =
-      snap.state === "FINISHED";
+  const maxEntries =
+    isFinal ? 3 : 5;
 
-    const maxEntries =
-      isFinal ? 3 : 5;
+  const players =
+    snap.leaderboard || [];
 
-    const title =
-      isFinal
-        ? "🏆 Final Winners (Top 3)"
-        : "Top 5 Players";
+  const tiktokPlayers =
+    players
+      .filter(
+        (player) =>
+          String(player.platform).toLowerCase() === "tiktok"
+      )
+      .slice(0, maxEntries);
 
-    if (
-      leaderboardTitle &&
-      leaderboardTitle.textContent !== title
-    ) {
-      leaderboardTitle.textContent =
-        title;
-    }
+  const facebookPlayers =
+    players
+      .filter(
+        (player) =>
+          String(player.platform).toLowerCase() === "facebook"
+      )
+      .slice(0, maxEntries);
 
-    const players =
-      (snap.leaderboard || [])
-        .slice(0, maxEntries);
+  renderPlatformLeaderboard(
+    tiktokLeaderboardList,
+    tiktokPlayers,
+    isFinal
+  );
 
-    const leaderboardKey =
-      JSON.stringify({
-        isFinal,
-        players:
-          players.map(
-            (player, index) => ({
-              rank:
-                index + 1,
-              platform:
-                player.platform ||
-                "LIVE",
-              name:
-                player.display_name ||
-                player.username ||
-                "Anonymous",
-              score:
-                player.score
-            })
-          )
-      });
+  renderPlatformLeaderboard(
+    facebookLeaderboardList,
+    facebookPlayers,
+    isFinal
+  );
+}
 
-    if (
-      leaderboardKey ===
-      lastLeaderboardKey
-    ) {
-      return;
-    }
+function renderPlatformLeaderboard(
+  container,
+  players,
+  isFinal
+) {
+  if (!container) {
+    return;
+  }
 
-    lastLeaderboardKey =
-      leaderboardKey;
+  const leaderboardKey =
+    JSON.stringify(
+      players.map((player) => ({
+        name:
+          player.display_name ||
+          player.username ||
+          "Anonymous",
+        score: player.score
+      }))
+    );
 
-    const fragment =
-      document.createDocumentFragment();
+  const previousKey =
+    container.dataset.leaderboardKey || "";
 
-    if (
-      players.length === 0
-    ) {
-      const empty =
-        document.createElement("div");
+  if (
+    previousKey === leaderboardKey
+  ) {
+    return;
+  }
 
-      empty.style.color =
-        "var(--text-muted)";
+  container.dataset.leaderboardKey =
+    leaderboardKey;
 
-      empty.style.fontSize =
-        "0.85rem";
+  const fragment =
+    document.createDocumentFragment();
 
-      empty.style.padding =
-        "6px 0";
+  if (players.length === 0) {
+    const empty =
+      document.createElement("div");
 
-      empty.textContent =
-        "No scores recorded yet.";
+    empty.style.color =
+      "var(--text-muted)";
 
-      fragment.appendChild(
-        empty
-      );
+    empty.style.fontSize =
+      "0.85rem";
 
-    } else {
-      players.forEach(
-        (player, index) => {
-          const row =
-            document.createElement(
-              "div"
-            );
+    empty.style.padding =
+      "6px 0";
 
-          row.className =
-            "leaderboard-row";
+    empty.textContent =
+      "No scores yet.";
 
-          const platformClass =
-            (player.platform || "")
-              .toLowerCase()
-              .includes("tiktok")
-              ? "tiktok"
-              : "facebook";
+    fragment.appendChild(empty);
 
-          const playerInfo =
-            document.createElement(
-              "div"
-            );
+  } else {
+    players.forEach(
+      (player, index) => {
+        const row =
+          document.createElement("div");
 
-          playerInfo.className =
-            "player-info";
+        row.className =
+          "leaderboard-row";
 
-          const rank =
-            document.createElement(
-              "span"
-            );
+        const playerInfo =
+          document.createElement("div");
 
-          rank.className =
-            "player-rank";
+        playerInfo.className =
+          "player-info";
 
-          rank.textContent =
-            `#${index + 1}`;
+        const rank =
+          document.createElement("span");
 
-          const platform =
-            document.createElement(
-              "span"
-            );
+        rank.className =
+          "player-rank";
 
-          platform.className =
-            `platform-pill ${platformClass}`;
+        rank.textContent =
+          `#${index + 1}`;
 
-          platform.textContent =
-            player.platform ||
-            "LIVE";
+        const name =
+          document.createElement("span");
 
-          const name =
-            document.createElement(
-              "span"
-            );
+        name.className =
+          "player-name";
 
-          name.className =
-            "player-name";
+        name.textContent =
+          player.display_name ||
+          player.username ||
+          "Anonymous";
 
-          name.textContent =
-            player.display_name ||
-            player.username ||
-            "Anonymous";
+        const score =
+          document.createElement("span");
 
-          const score =
-            document.createElement(
-              "span"
-            );
+        score.className =
+          "player-score";
 
-          score.className =
-            "player-score";
+        score.textContent =
+          `${player.score} pts`;
 
-          score.textContent =
-            `${player.score} pts`;
+        playerInfo.append(
+          rank,
+          name
+        );
 
-          playerInfo.append(
-            rank,
-            platform,
-            name
-          );
+        row.append(
+          playerInfo,
+          score
+        );
 
-          row.append(
-            playerInfo,
-            score
-          );
-
-          fragment.appendChild(
-            row
-          );
-        }
-      );
-    }
-
-    leaderboardList.replaceChildren(
-      fragment
+        fragment.appendChild(row);
+      }
     );
   }
 
+  container.replaceChildren(
+    fragment
+  );
+}
   // --------------------------------------------------------------------------
   // Platform telemetry
   // --------------------------------------------------------------------------

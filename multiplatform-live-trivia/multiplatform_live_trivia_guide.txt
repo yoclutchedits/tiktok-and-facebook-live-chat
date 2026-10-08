@@ -1,1054 +1,116 @@
-MULTIPLATFORM LIVE TRIVIA
-COMPLETE USER GUIDE
-TikTok + Facebook Live + Social Stream Ninja
-Local Python/FastAPI application
+# Multiplatform LIVE Trivia — Daily User Guide
 
-============================================================
-1. WHAT THIS PROJECT DOES
-============================================================
+## 1. Start the Trivia Program
 
-This application runs a local trivia game and accepts chat answers from
-TikTok and Facebook.
+Open the **Multiplatform LIVE Trivia** project folder.
 
-Main flow:
-
-    TikTok comments
-          |
-          v
-    TikTok adapter
-          |
-          +------------------+
-                             |
-    Facebook comments       v
-          |            Chat Queue
-          v                 |
-    Social Stream Ninja     v
-          |             Trivia Engine
-          |                 |
-          +-----------------+
-                            |
-                            v
-                     Web Dashboard
-                            |
-                            v
-                       Leaderboard
-
-Facebook no longer uses the Meta Graph API in this setup.
-
-Facebook comments are captured by Social Stream Ninja and delivered to
-the Python application through a WebSocket on Channel 4.
-
-============================================================
-2. PROJECT FOLDER
-============================================================
-
-The project folder is:
-
-    multiplatform-live-trivia
-
-Important files:
-
-    main.py
-        Starts the FastAPI web server and the trivia application.
-
-    config.json
-        Main settings for timing, TikTok, Facebook, queues, and web server.
-
-    questions.json
-        Trivia questions.
-
-    app/
-        Python application code.
-
-    app/integrations/facebook.py
-        Facebook adapter using Social Stream Ninja.
-
-    app/integrations/tiktok.py
-        TikTok adapter.
-
-    app/core/engine.py
-        Trivia game engine.
-
-    app/core/matcher.py
-        Checks whether submitted answers are correct.
-
-    app/core/question_loader.py
-        Loads and validates questions.
-
-    web/index.html
-        Main dashboard.
-
-    web/overlay.html
-        OBS/browser overlay.
-
-    web/app.js
-        Dashboard/overlay browser logic.
-
-    web/style.css
-        Dashboard styling.
-
-    web/sfx/tick.mp3
-        Countdown tick sound.
-
-    web/sfx/end.mp3
-        Timer-finished sound.
-
-    data/leaderboard.json
-        Saved leaderboard data.
-
-    data/leaderboard.txt
-        Human-readable leaderboard.
-
-============================================================
-3. REQUIREMENTS
-============================================================
-
-Use a modern Python version.
-
-Install the requirements from the project directory:
-
-    pip install -r requirements.txt
-
-The Facebook Social Stream Ninja adapter requires the Python
-websockets package. It is already included in requirements.txt.
-
-============================================================
-4. CONFIG.JSON
-============================================================
-
-The important current configuration is:
-
-    {
-      "questions_file": "questions.json",
-      "game": {
-        "question_duration_sec": 15.0,
-        "result_duration_sec": 5.0,
-        "transition_duration_sec": 3.0
-      },
-      "timing": {
-        "facebook_tolerance_sec": 1.0,
-        "drain_idle_sec": 0.05,
-        "drain_hard_cap_sec": 1.5
-      },
-      "queues": {
-        "chat_maxsize": 10000
-      },
-      "tiktok": {
-        "enabled": true,
-        "username": "@sanukajishrestha22"
-      },
-      "facebook": {
-        "enabled": true,
-        "session_id": ""
-      },
-      "web": {
-        "host": "127.0.0.1",
-        "port": 8000
-      }
-    }
-
-For Facebook, the only important Social Stream Ninja value is:
-
-    "session_id": "YOUR_SESSION_ID"
-
-Do NOT put a Facebook video ID in this field.
-
-Do NOT put a Facebook URL in this field.
-
-============================================================
-5. SOCIAL STREAM NINJA
-============================================================
-
-Social Stream Ninja is the bridge between Facebook chat and this
-Python application.
-
-Official API documentation:
-
-    https://github.com/steveseguin/social_stream/blob/main/api.md
-
-Current Social Stream Ninja documentation says that a chat listener
-should:
-
-    1. Enable remote API control of the extension.
-    2. Enable "Send chat messages to API server".
-    3. Listen on WebSocket Channel 4.
-
-The Python adapter connects to:
-
-    wss://io.socialstream.ninja/join/SESSION_ID/4
-
-Channel 4 is the chat-message channel.
-
-============================================================
-6. CREATE / OPEN YOUR SOCIAL STREAM NINJA SESSION
-============================================================
-
-Open:
-
-    https://socialstream.ninja/
-
-Open the Social Stream Ninja Dock.
-
-A Dock URL looks like:
-
-    https://socialstream.ninja/dock.html?session=XXXXXXXXXX
-
-The value after:
-
-    session=
-
-is the Social Stream Ninja session ID.
-
-Example:
-
-    https://socialstream.ninja/dock.html?session=yZtdNe2iXn&v=3.50.25
-
-The session ID in this example is:
-
-    yZtdNe2iXn
-
-Important:
-
-Keep using the same session URL/session when possible.
-
-If you create a new Social Stream Ninja session and its URL contains
-a different session value, update config.json with the new value.
-
-Do not assume that the session ID is the Facebook video ID. They are
-completely different things.
-
-============================================================
-7. SOCIAL STREAM NINJA SETTINGS
-============================================================
-
-In Social Stream Ninja open:
-
-    Global Settings
-        >
-    Mechanics
-
-For this trivia application, make sure these are enabled:
-
-    [x] Enable remote API control of extension
-
-and:
-
-    [x] Send chat messages to API server
-
-The second setting is especially important.
-
-The current Social Stream Ninja API documentation identifies
-"Send chat messages to API server" as the setting required to receive
-chat messages on Channel 4.
-
-You do not need to enable unrelated API options just for the trivia
-chat listener.
-
-============================================================
-8. CONNECT FACEBOOK TO SOCIAL STREAM NINJA
-============================================================
-
-Open Facebook in the browser where Social Stream Ninja is active.
-
-Open the Facebook Live/video that you want to capture.
-
-Social Stream Ninja supports Facebook Live and static Facebook comments.
-
-When Facebook comments are successfully captured, they appear in the
-Social Stream Ninja Dock.
-
-For example:
-
-    Prashanna Sharma    TRIVIA_TEST_123
-
-Seeing a comment in the Dock proves:
-
-    Facebook
-       |
-       v
-    Social Stream Ninja
-
-It does NOT by itself prove that Python has received the comment.
-
-The Python connection must be tested separately.
-
-============================================================
-9. PUT THE SESSION ID INTO CONFIG.JSON
-============================================================
-
-Open:
-
-    config.json
-
-Find:
-
-    "facebook": {
-      "enabled": true,
-      "session_id": ""
-    }
-
-Change it to:
-
-    "facebook": {
-      "enabled": true,
-      "session_id": "yZtdNe2iXn"
-    }
-
-Replace yZtdNe2iXn with your current session ID if it is different.
-
-Save the file.
-
-============================================================
-10. START THE TRIVIA APPLICATION
-============================================================
-
-Open a terminal in:
-
-    multiplatform-live-trivia
+Right-click inside the folder and choose **Open in Terminal**.
 
 Run:
 
-    python main.py
+```bash
+python main.py
+```
 
-The application should start on:
+Keep this terminal open while using the trivia.
 
-    http://127.0.0.1:8000/
+Then open a web browser and go to:
 
-Open that address in your browser.
+```text
+http://127.0.0.1:8000
+```
 
-============================================================
-11. CHECK THE DASHBOARD STATUS
-============================================================
+This opens the Trivia Dashboard.
 
-At the bottom of the dashboard you should see platform statuses.
+---
 
-Facebook should eventually say:
+## 2. Prepare the LIVE
 
-    Facebook: CONNECTED
+### TikTok
 
-This means the Python FacebookAdapter successfully established its
-WebSocket connection to Social Stream Ninja.
+Start the TikTok LIVE normally.
 
-It does NOT automatically prove that chat messages are reaching the
-trivia queue.
+The trivia program will automatically connect to the TikTok LIVE using the configured account.
 
-The next test proves message delivery.
+### Facebook
 
-============================================================
-12. COMPLETE FACEBOOK TEST
-============================================================
+Before using Facebook LIVE:
 
-TEST A - FACEBOOK TO SOCIAL STREAM NINJA
+1. Open the saved **Social Stream Ninja** session.
+2. Make sure the Facebook LIVE is connected.
+3. Keep the Social Stream Ninja Dock open.
+4. Do not close the Social Stream Ninja window while the trivia is running.
 
-1. Open your Facebook video/live.
-2. Post a unique test comment:
+---
 
-       TRIVIA_TEST_123
+## 3. Check the Dashboard
 
-3. Look at the Social Stream Ninja Dock.
+On the Trivia Dashboard, check that the platforms are connected.
 
-If you see:
+The question and leaderboard will appear on the dashboard.
 
-       TRIVIA_TEST_123
+OBS should already be configured to show:
 
-then Facebook capture works.
+```text
+http://127.0.0.1:8000/overlay
+```
 
-TEST B - SOCIAL STREAM NINJA TO PYTHON
+Do not change the OBS Browser Source.
 
-1. Leave Social Stream Ninja running.
-2. Leave python main.py running.
-3. Make sure the dashboard says:
+---
 
-       Facebook: CONNECTED
+## 4. Start the Trivia
 
-4. Post another unique comment:
+When everything is ready:
 
-       TRIVIA_TEST_456
+1. Make sure the LIVE is running.
+2. Make sure the platforms are connected.
+3. Click **START ROUND**.
+4. The question appears.
+5. Viewers answer in the LIVE chat.
+6. Correct answers automatically receive points.
+7. When the timer ends, the result is shown.
+8. Click **START ROUND** again for the next question.
 
-5. Check the trivia dashboard.
+Repeat until all questions are finished.
 
-The dashboard queue should increase or the message should otherwise
-be processed by the application.
+---
 
-The complete successful path is:
+## 5. Questions
 
-    Facebook
-       |
-       v
-    Social Stream Ninja Dock
-       |
-       v
-    Social Stream Ninja WebSocket
-       |
-       v
-    Channel 4
-       |
-       v
-    app/integrations/facebook.py
-       |
-       v
-    chat_queue
-       |
-       v
-    TriviaEngine
+The questions are already prepared in:
 
-============================================================
-13. WHAT TO DO IF THE DOCK SHOWS THE COMMENT BUT THE DASHBOARD DOES NOT
-============================================================
+```text
+data/questions.json
+```
 
-This is an important troubleshooting case.
+For normal daily use, **do not edit this file**.
 
-If:
+The person using the program only needs to start the game and run the rounds.
 
-    Social Stream Ninja Dock = comment visible
+---
 
-but:
+## 6. After the Game
 
-    Trivia dashboard = no comment
+When the last question finishes, the final leaderboard is displayed.
 
-then Facebook itself is NOT the problem.
+The scores are automatically saved.
 
-The failure is somewhere after Social Stream Ninja capture.
+To finish for the day:
 
-Check these items in order:
+1. Stop the LIVE.
+2. Close the Trivia browser page.
+3. Stop the program by pressing `Ctrl + C` in the terminal.
 
-1. Confirm:
+The next day, start the program again with:
 
-       Facebook: CONNECTED
+```bash
+python main.py
+```
 
-2. Confirm the Python app is using the same session ID shown in the
-   Social Stream Ninja Dock URL.
-
-3. Confirm:
-
-       Send chat messages to API server
-
-   is enabled.
-
-4. Restart:
-
-       python main.py
-
-5. Post a NEW test comment.
-
-6. Check the terminal running Python for connection/disconnection
-   messages.
-
-Do not immediately change facebook.py.
-
-The connection can be established while message routing is still
-incorrect, so testing Channel 4 is the correct next step.
-
-============================================================
-14. DIRECT CHANNEL 4 TEST
-============================================================
-
-Social Stream Ninja's official API documentation gives this WebSocket
-pattern for a chat listener:
-
-    wss://io.socialstream.ninja/join/SESSION_ID/4
-
-Channel 4 is the channel used for chat messages when the appropriate
-API setting is enabled.
-
-A minimal independent Python test is:
-
-    import asyncio
-    import json
-    import websockets
-
-    SESSION_ID = "YOUR_SESSION_ID"
-
-    async def test():
-        uri = f"wss://io.socialstream.ninja/join/{SESSION_ID}/4"
-
-        async with websockets.connect(uri) as ws:
-            print("CONNECTED TO CHANNEL 4")
-
-            async for raw in ws:
-                print(raw)
-
-    asyncio.run(test())
-
-Run this only as a troubleshooting test, not as a replacement for
-the production application.
-
-If this test prints incoming JSON when a Facebook comment is posted,
-Social Stream Ninja Channel 4 is working.
-
-If the independent test receives the comment but the trivia app does
-not, the problem is inside the application's Facebook adapter or
-queue handling.
-
-============================================================
-15. MCQ QUESTIONS
-============================================================
-
-MCQ questions use:
-
-    "type": "mcq"
-
-and:
-
-    "options": {
-      "A": "London",
-      "B": "Paris",
-      "C": "Berlin",
-      "D": "Madrid"
-    }
-
-Example question:
-
-    {
-      "question": "What is the capital of France?",
-      "type": "mcq",
-      "options": {
-        "A": "London",
-        "B": "Paris",
-        "C": "Berlin",
-        "D": "Madrid"
-      },
-      "answers": ["B"]
-    }
-
-The answer can also use the option text:
-
-    "answers": ["Paris"]
-
-The matcher is case-insensitive.
-
-For the example above, a player can answer:
-
-    B
-
-or:
-
-    b
-
-and the option is treated as the same answer.
-
-============================================================
-16. IMPORTANT MCQ ANSWER RULE
-============================================================
-
-For a single-answer MCQ, keep the correct answer unambiguous.
-
-Recommended:
-
-    "answers": ["B"]
-
-or:
-
-    "answers": ["Paris"]
-
-Do not intentionally list different correct options such as:
-
-    "answers": ["A", "B"]
-
-unless the question is designed to accept multiple correct choices.
-
-============================================================
-17. QUESTION COUNT
-============================================================
-
-The dashboard displays progress such as:
-
-    Q 2/20
-
-This means question 2 out of 20.
-
-The current repository contains test questions about the capital of
-France. Replace these test questions with your real trivia questions
-before production use.
-
-============================================================
-18. 15-SECOND TIMER
-============================================================
-
-The current game configuration uses:
-
-    "question_duration_sec": 15.0
-
-The backend is the source of truth for the countdown.
-
-The browser displays the server's:
-
-    time_remaining
-
-value.
-
-This avoids the old problem where a browser timer could restart or
-drift every time a WebSocket snapshot arrived.
-
-The timer also has sound effects:
-
-    web/sfx/tick.mp3
-    web/sfx/end.mp3
-
-The browser loads them from:
-
-    /static/sfx/tick.mp3
-    /static/sfx/end.mp3
-
-The tick sound plays as the displayed countdown second changes.
-
-The end sound plays when the question leaves ACTIVE and moves into
-the ending/result phase.
-
-============================================================
-19. STARTING A GAME
-============================================================
-
-Open:
-
-    http://127.0.0.1:8000/
-
-Click:
-
-    START ROUND
-
-The game then progresses through its states.
-
-The normal sequence is approximately:
-
-    ACTIVE
-       |
-       v
-    DRAINING
-       |
-       v
-    RESULT
-       |
-       v
-    TRANSITION
-       |
-       v
-    ACTIVE
-
-The exact behavior is controlled by the game engine and config values.
-
-============================================================
-20. ANSWERING QUESTIONS
-============================================================
-
-For an MCQ question, viewers can answer using the option label.
-
-Example:
-
-    A
-    B
-    C
-    D
-
-For:
-
-    A = London
-    B = Paris
-    C = Berlin
-    D = Madrid
-
-a viewer answering:
-
-    B
-
-should be matched against option B.
-
-The matcher is case-insensitive.
-
-============================================================
-21. LEADERBOARD
-============================================================
-
-The application writes:
-
-    data/leaderboard.json
-
-and:
-
-    data/leaderboard.txt
-
-The leaderboard is persisted at result/finished stages.
-
-The application also initializes the leaderboard persistence when it
-starts.
-
-Current behavior is intentionally to clear the previous leaderboard
-at program startup.
-
-Therefore:
-
-    Restart application
-          =
-    start a fresh leaderboard
-
-After the game finishes, the final leaderboard remains available until
-the application is restarted.
-
-============================================================
-22. RUNNING OBS
-============================================================
-
-The application has an overlay route:
-
-    http://127.0.0.1:8000/overlay
-
-Use this page as the browser source in OBS.
-
-The dashboard is:
-
-    http://127.0.0.1:8000/
-
-The overlay is:
-
-    http://127.0.0.1:8000/overlay
-
-If both pages are open, both browser pages can establish WebSocket
-connections and can execute browser-side audio code.
-
-For sound testing, keep this in mind because two pages can potentially
-produce duplicate browser sounds.
-
-============================================================
-23. RUNNING ON A SECOND DEVICE
-============================================================
-
-The default web server is:
-
-    127.0.0.1
-
-That means it is accessible only from the same computer.
-
-If you want another device on the same network to open the dashboard,
-the web server must listen on the computer's network interface rather
-than only localhost.
-
-Do not change this casually on a public/untrusted network.
-
-For a private home/local network, use your computer's LAN IP and
-configure the web server accordingly.
-
-============================================================
-24. TIKTOK STATUS
-============================================================
-
-The dashboard can show:
-
-    TikTok: CONNECTING
-
-while:
-
-    Facebook: CONNECTED
-
-This does not mean Facebook is broken.
-
-Each platform has its own adapter and connection.
-
-Troubleshoot TikTok and Facebook separately.
-
-============================================================
-25. FACEBOOK DOES NOT USE GRAPH API NOW
-============================================================
-
-The current Facebook implementation is intentionally different from
-the previous Meta Graph API approach.
-
-Old approach:
-
-    Python
-       |
-       v
-    Meta Graph API
-       |
-       v
-    Facebook
-
-Current approach:
-
-    Facebook
-       |
-       v
-    Social Stream Ninja
-       |
-       v
-    WebSocket Channel 4
-       |
-       v
-    Python
-
-Therefore you do not need:
-
-    FACEBOOK_ACCESS_TOKEN
-
-or:
-
-    live_video_id
-
-for the current Facebook adapter.
-
-The Facebook config uses:
-
-    session_id
-
-============================================================
-26. DO NOT CONFUSE THESE IDs
-============================================================
-
-There are several different identifiers.
-
-A. Social Stream Ninja session ID
-
-Example:
-
-    yZtdNe2iXn
-
-Found in:
-
-    dock.html?session=yZtdNe2iXn
-
-Used in:
-
-    config.json
-
-B. Facebook video/live ID
-
-This belongs to Facebook.
-
-It is NOT used as the Social Stream Ninja session ID.
-
-C. Facebook URL
-
-Example:
-
-    https://www.facebook.com/Reuters/videos/...
-
-This is a page/video URL.
-
-It is NOT the value for:
-
-    facebook.session_id
-
-============================================================
-27. NORMAL DAILY WORKFLOW
-============================================================
-
-Before a livestream:
-
-1. Start Social Stream Ninja.
-2. Open/confirm your Dock session.
-3. Confirm the Dock session ID.
-4. Confirm:
-       Enable remote API control of extension
-5. Confirm:
-       Send chat messages to API server
-6. Open the Facebook Live source.
-7. Confirm comments appear in the Social Stream Ninja Dock.
-8. Check config.json has the same session ID.
-9. Start:
-       python main.py
-10. Open:
-       http://127.0.0.1:8000/
-11. Confirm:
-       Facebook: CONNECTED
-12. Post one test comment.
-13. Confirm the Python dashboard receives it.
-14. Start the trivia round.
-
-============================================================
-28. NORMAL SHUTDOWN
-============================================================
-
-When finished:
-
-1. Stop the trivia game if needed.
-2. Stop the Python server with:
-
-       Ctrl+C
-
-3. Close Social Stream Ninja when you are finished.
-
-============================================================
-29. TROUBLESHOOTING CHECKLIST
-============================================================
-
-Problem:
-    Facebook says DISABLED.
-
-Check:
-    "enabled": true
-
-and:
-
-    "session_id": "YOUR_SESSION_ID"
-
-Problem:
-    Facebook says DISCONNECTED.
-
-Check:
-    Social Stream Ninja is running.
-    The session ID is correct.
-    Internet connection is working.
-    Restart python main.py.
-
-Problem:
-    Facebook says CONNECTED but no comments reach the game.
-
-Check in this order:
-
-    1. Comments visible in Social Stream Ninja Dock?
-    2. "Send chat messages to API server" enabled?
-    3. Correct session ID?
-    4. Python connected to Channel 4?
-    5. Restart main.py.
-    6. Test with a NEW comment.
-
-Problem:
-    Comment appears in Social Stream Ninja but not dashboard.
-
-This is the most important diagnostic distinction.
-
-It means:
-
-    Facebook -> Social Stream Ninja = WORKING
-
-but:
-
-    Social Stream Ninja -> Python = NOT YET VERIFIED/WORKING
-
-Do not change Facebook settings that are already proven to work.
-Test Channel 4 next.
-
-Problem:
-    Dashboard says TikTok CONNECTING.
-
-Treat TikTok separately. Facebook can still work.
-
-Problem:
-    Timer appears to reset.
-
-Check that the current web/app.js uses the backend
-snap.time_remaining value as the source of truth.
-
-Problem:
-    No sound.
-
-Check:
-
-    web/sfx/tick.mp3
-    web/sfx/end.mp3
-
-and browser audio permissions.
-
-Click START ROUND from the dashboard to provide a user interaction
-that allows the browser to unlock audio playback.
-
-Problem:
-    Old leaderboard is gone.
-
-This is expected after application startup with the current behavior.
-
-============================================================
-30. PRODUCTION TEST BEFORE EVERY STREAM
-============================================================
-
-Run this checklist:
-
-    [ ] Social Stream Ninja opens.
-    [ ] Dock shows the expected session.
-    [ ] Remote API control is enabled.
-    [ ] Send chat messages to API server is enabled.
-    [ ] Facebook comments appear in the Dock.
-    [ ] config.json has the matching session ID.
-    [ ] python main.py starts without errors.
-    [ ] Dashboard opens.
-    [ ] Facebook says CONNECTED.
-    [ ] A test Facebook comment reaches the trivia application.
-    [ ] Questions are correct.
-    [ ] MCQ options are correct.
-    [ ] Correct answers are correct.
-    [ ] 15-second timer works.
-    [ ] Tick sound works.
-    [ ] End sound works.
-    [ ] Leaderboard works.
-    [ ] OBS overlay displays correctly.
-
-============================================================
-31. THE MOST IMPORTANT CONCEPT
-============================================================
-
-There are three separate tests.
-
-TEST 1:
-
-    Facebook -> Social Stream Ninja
-
-Proof:
-    Comment appears in Social Stream Ninja Dock.
-
-TEST 2:
-
-    Social Stream Ninja -> Python
-
-Proof:
-    Python receives the comment from Channel 4.
-
-TEST 3:
-
-    Python -> Trivia Engine -> Dashboard
-
-Proof:
-    The comment appears in the application/queue and is processed
-    as a trivia answer.
-
-Do not treat a successful Test 1 as proof that Tests 2 and 3 work.
-
-============================================================
-32. CURRENT TEST STATUS
-============================================================
-
-At the time this guide was updated:
-
-    Social Stream Ninja is successfully capturing Facebook comments.
-
-A test comment:
-
-    TRIVIA_TEST_123
-
-was visible in the Social Stream Ninja Dock.
-
-The trivia dashboard showed:
-
-    Facebook: CONNECTED
-
-However, the dashboard queue was still:
-
-    0/10000
-
-so the complete Social Stream Ninja -> Python message-delivery path
-still needs to be verified.
-
-The next diagnostic step is to verify the "Send chat messages to API
-server" setting and, if necessary, test Channel 4 directly.
-
-============================================================
-33. OFFICIAL SOCIAL STREAM NINJA REFERENCES
-============================================================
-
-API documentation:
-
-    https://github.com/steveseguin/social_stream/blob/main/api.md
-
-API sandbox:
-
-    https://socialstream.ninja/sampleapi.html
-
-Main site:
-
-    https://socialstream.ninja/
-
-The official API documentation currently specifies Channel 4 for
-receiving chat messages when "Send chat messages to API server" is
-enabled.
-
-============================================================
-END OF GUIDE
-============================================================
+## Important
+
+* Keep the terminal running while Trivia is being used.
+* Keep Social Stream Ninja open during Facebook LIVE.
+* Do not close or change the project files during a game.
+* Do not start `main.py` more than once.

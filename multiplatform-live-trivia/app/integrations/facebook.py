@@ -25,7 +25,19 @@ class FacebookAdapter:
     Receives Facebook LIVE chat through Social Stream Ninja.
 
     Social Stream Ninja sends chat messages over WebSocket channel 4.
+
+    IMPORTANT:
+    A successful WebSocket connection does NOT necessarily mean that
+    the Social Stream Ninja extension is active or that Facebook chat
+    is being captured.
+
+    Therefore Facebook is only marked CONNECTED after a valid Facebook
+    chat message is actually received.
     """
+
+    # Maximum amount of time we allow the WebSocket to remain silent
+    # before considering the Facebook connection inactive.
+    NO_DATA_TIMEOUT_SEC = 15.0
 
     def __init__(
         self,
@@ -49,6 +61,9 @@ class FacebookAdapter:
         self._task: Optional[asyncio.Task] = None
 
         self.dropped_messages = 0
+
+        # True only after an actual Facebook chat message has arrived.
+        self._received_facebook_data = False
 
     def _update_status(
         self,
@@ -181,6 +196,10 @@ class FacebookAdapter:
         """
         Connect to Social Stream Ninja Channel 4 and
         continuously receive Facebook chat messages.
+
+        The WebSocket opening is NOT considered a successful
+        Facebook connection. We only report CONNECTED after
+        receiving an actual Facebook chat message.
         """
         uri = (
             "wss://io.socialstream.ninja/join/"
@@ -188,6 +207,8 @@ class FacebookAdapter:
         )
 
         while self._running:
+            self._received_facebook_data = False
+
             try:
                 self._update_status(
                     PlatformStatusType.CONNECTING,
@@ -204,18 +225,42 @@ class FacebookAdapter:
                     if not self._running:
                         break
 
-                    self._update_status(
-                        PlatformStatusType.CONNECTED,
-                        "Facebook chat connected via Social Stream Ninja",
-                    )
-
                     logger.info(
-                        "Facebook chat connected through "
-                        "Social Stream Ninja session %s.",
+                        "Facebook WebSocket connected through "
+                        "Social Stream Ninja session %s. "
+                        "Waiting for Facebook chat data.",
                         self.session_id,
                     )
 
-                    async for raw_message in websocket:
+                    while self._running:
+                        try:
+                            raw_message = await asyncio.wait_for(
+                                websocket.recv(),
+                                timeout=self.NO_DATA_TIMEOUT_SEC,
+                            )
+
+                        except asyncio.TimeoutError:
+                            if self._received_facebook_data:
+                                self._update_status(
+                                    PlatformStatusType.DISCONNECTED,
+                                    "Facebook chat stopped sending data",
+                                )
+                            else:
+                                self._update_status(
+                                    PlatformStatusType.DISCONNECTED,
+                                    "No Facebook chat data received; "
+                                    "check the Social Stream Ninja extension "
+                                    "and session ID",
+                                )
+
+                            logger.warning(
+                                "No Facebook chat data received from "
+                                "Social Stream Ninja for %.1f seconds.",
+                                self.NO_DATA_TIMEOUT_SEC,
+                            )
+
+                            break
+
                         if not self._running:
                             break
 
@@ -274,6 +319,23 @@ class FacebookAdapter:
 
                         if not text:
                             continue
+
+                        # --------------------------------------------------
+                        # We now know Facebook chat is actually working.
+                        # --------------------------------------------------
+
+                        if not self._received_facebook_data:
+                            self._received_facebook_data = True
+
+                            self._update_status(
+                                PlatformStatusType.CONNECTED,
+                                "Facebook chat receiving data",
+                            )
+
+                            logger.info(
+                                "Facebook chat data received "
+                                "through Social Stream Ninja."
+                            )
 
                         # --------------------------------------------------
                         # Message ID / duplicate detection
@@ -396,8 +458,9 @@ class FacebookAdapter:
                     "Facebook Social Stream Ninja connection failed."
                 )
 
+            if self._running:
                 # Wait before reconnecting.
-                await asyncio.sleep(3)
+                await asyncio.sleep(5)
 
         # Listener has stopped.
         self._update_status(
