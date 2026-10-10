@@ -164,11 +164,17 @@
   function renderSnapshot(snap) {
     currentSnapshot = snap;
 
-    questionCount.textContent =
-      `Q ${snap.question_number}/${snap.total_questions}`;
+    const isWelcome = snap.question_type === "welcome";
+
+    if (questionCount) {
+      questionCount.textContent =
+        `Q ${snap.question_number}/${snap.total_questions}`;
+
+      questionCount.style.visibility =
+        isWelcome ? "hidden" : "visible";
+    }
 
     updateStateBadge(snap.state);
-    const isWelcome = snap.question_type === "welcome";
 
     if (timerWrapper) {
       timerWrapper.style.display = isWelcome ? "none" : "";

@@ -81,6 +81,36 @@ def wait_until_state(
     return False
 
 
+def wait_until_snapshot(client, predicate, timeout: float = 1.0) -> bool:
+    """Wait until the public snapshot satisfies a predicate."""
+    deadline = time.monotonic() + timeout
+
+    while time.monotonic() < deadline:
+        response = client.get("/status")
+
+        if response.status_code == 200 and predicate(response.json()):
+            return True
+
+        time.sleep(0.01)
+
+    return False
+
+
+def dismiss_welcome_screen(client) -> None:
+    """Dismiss the initial welcome entry and wait for the first real question."""
+    response = client.post("/game/start")
+    assert response.status_code == 200
+
+    assert wait_until_snapshot(
+        client,
+        lambda snapshot: (
+            snapshot.get("question_type") == "question"
+            and snapshot.get("state") == "WAITING_FOR_START"
+        ),
+        timeout=0.5,
+    )
+
+
 def test_root_dashboard_is_available(client):
     response = client.get("/")
 
@@ -109,6 +139,7 @@ def test_production_status_endpoint(client):
 
 
 def test_production_start_endpoint(client):
+    # The first START dismisses the welcome screen without starting a timer.
     response = client.post("/game/start")
 
     assert response.status_code == 200
@@ -116,6 +147,19 @@ def test_production_start_endpoint(client):
         "status": "ok",
         "action": "START",
     }
+
+    assert wait_until_snapshot(
+        client,
+        lambda snapshot: (
+            snapshot.get("question_type") == "question"
+            and snapshot.get("state") == "WAITING_FOR_START"
+        ),
+        timeout=0.5,
+    )
+
+    # A second START begins the first timed question.
+    response = client.post("/game/start")
+    assert response.status_code == 200
 
     assert wait_until_state(
         client,
@@ -125,8 +169,9 @@ def test_production_start_endpoint(client):
 
 
 def test_cannot_start_twice(client):
-    first = client.post("/game/start")
+    dismiss_welcome_screen(client)
 
+    first = client.post("/game/start")
     assert first.status_code == 200
 
     assert wait_until_state(
@@ -142,6 +187,8 @@ def test_cannot_start_twice(client):
 
 
 def test_production_stop_endpoint(client):
+    dismiss_welcome_screen(client)
+
     start_response = client.post("/game/start")
 
     assert start_response.status_code == 200

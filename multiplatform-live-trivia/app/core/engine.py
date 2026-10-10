@@ -743,15 +743,16 @@ class TriviaEngine:
 
         return GameSnapshot(
             state=self.state.value,
-            question_number=(
-                min(
-                    self.current_question_index + 1,
-                    len(self.questions),
-                )
-                if self.questions
-                else 0
+            question_number=sum(
+                1
+                for question in self.questions[:self.current_question_index + 1]
+                if question.question_type != QuestionType.WELCOME
             ),
-            total_questions=len(self.questions),
+            total_questions=sum(
+                1
+                for question in self.questions
+                if question.question_type != QuestionType.WELCOME
+            ),
             question=current_question,
             deadline=self.current_deadline,
             platforms={},
