@@ -369,55 +369,74 @@ async def test_multiple_questions_require_separate_start_and_finish():
         question_duration_sec=0.05,
         result_duration_sec=0.01,
         transition_duration_sec=0.01,
+        facebook_answer_grace_sec=0.0,
+        drain_idle_sec=0.01,
+        drain_hard_cap_sec=0.05,
     )
+
+    async def wait_for_state(expected_state):
+        deadline = time.monotonic() + 2.0
+
+        while time.monotonic() < deadline:
+            if engine.state == expected_state:
+                return
+
+            await asyncio.sleep(0.005)
+
+        raise AssertionError(
+            f"Timed out waiting for {expected_state}; "
+            f"current state is {engine.state}"
+        )
 
     engine.start()
 
-    # First question must wait for START.
-    await asyncio.sleep(0.01)
-    assert engine.state == GameState.WAITING_FOR_START
-    assert engine.current_question_index == 0
+    try:
+        await wait_for_state(GameState.WAITING_FOR_START)
+        assert engine.current_question_index == 0
 
-    # Start question 1.
-    engine.handle_command(
-        GameCommand(
-            command=GameCommandType.START
+        # Start question 1.
+        engine.handle_command(
+            GameCommand(command=GameCommandType.START)
         )
-    )
 
-    await asyncio.sleep(0.02)
-    assert engine.state == GameState.ACTIVE
-    assert engine.current_question_index == 0
+        await wait_for_state(GameState.ACTIVE)
+        await wait_for_state(GameState.RESULT)
 
-    # Let question 1 finish.
-    await asyncio.sleep(0.08)
+        # Results must stay visible until Space/START.
+        assert engine.current_question_index == 0
 
-    assert engine.state == GameState.WAITING_FOR_START
-    assert engine.current_question_index == 1
-
-    # Question 2 must NOT start automatically.
-    await asyncio.sleep(0.02)
-    assert engine.state == GameState.WAITING_FOR_START
-
-    # Start question 2.
-    engine.handle_command(
-        GameCommand(
-            command=GameCommandType.START
+        # Simulate pressing Space to advance.
+        engine.handle_command(
+            GameCommand(command=GameCommandType.START)
         )
-    )
 
-    await asyncio.sleep(0.02)
-    assert engine.state == GameState.ACTIVE
-    assert engine.current_question_index == 1
+        await wait_for_state(GameState.WAITING_FOR_START)
+        assert engine.current_question_index == 1
 
-    # Let question 2 finish.
-    await asyncio.sleep(0.08)
+        # Question 2 must wait for its own START.
+        await asyncio.sleep(0.02)
+        assert engine.state == GameState.WAITING_FOR_START
 
-    assert engine.state == GameState.FINISHED
-    assert engine.current_question_index == 2
+        engine.handle_command(
+            GameCommand(command=GameCommandType.START)
+        )
 
-    await engine.stop()
-    
+        await wait_for_state(GameState.ACTIVE)
+        await wait_for_state(GameState.RESULT)
+
+        assert engine.current_question_index == 1
+
+        # Advance from the final result screen.
+        engine.handle_command(
+            GameCommand(command=GameCommandType.START)
+        )
+
+        await wait_for_state(GameState.FINISHED)
+        assert engine.current_question_index == 2
+
+    finally:
+        await engine.stop()
+
 @pytest.mark.asyncio
 async def test_stop_during_active_round_shuts_down_cleanly():
     engine = TriviaEngine(
@@ -506,32 +525,170 @@ async def test_stop_during_transition_shuts_down_cleanly():
         question_duration_sec=0.05,
         result_duration_sec=0.01,
         transition_duration_sec=0.2,
+        facebook_answer_grace_sec=0.0,
+        drain_idle_sec=0.01,
+        drain_hard_cap_sec=0.05,
     )
+
+    async def wait_for_state(expected_state):
+        deadline = time.monotonic() + 2.0
+
+        while time.monotonic() < deadline:
+            if engine.state == expected_state:
+                return
+
+            await asyncio.sleep(0.005)
+
+        raise AssertionError(
+            f"Timed out waiting for {expected_state}; "
+            f"current state is {engine.state}"
+        )
 
     engine.start()
 
-    engine.handle_command(
-        GameCommand(
-            command=GameCommandType.START
+    try:
+        # Start the first question.
+        engine.handle_command(
+            GameCommand(
+                command=GameCommandType.START
+            )
+        )
+
+        await wait_for_state(GameState.ACTIVE)
+        await wait_for_state(GameState.RESULT)
+
+        # Results now require a manual advance.
+        engine.handle_command(
+            GameCommand(
+                command=GameCommandType.START
+            )
+        )
+
+        await wait_for_state(GameState.TRANSITION)
+
+        assert engine._running is True
+        assert engine.current_question_index == 0
+
+        # Stop the game while the transition is running.
+        await engine.stop()
+
+        assert engine.state == GameState.STOPPED
+        assert engine._running is False
+        assert engine._engine_task.done()
+        assert engine._queue_task.done()
+
+    finally:
+        if engine._running:
+            await engine.stop()
+
+@pytest.mark.asyncio
+async def test_facebook_grace_timer_counts_down():
+    """The extra Facebook timer should decrease during DRAINING."""
+    grace_sec = 0.5
+
+    engine = TriviaEngine(
+        questions=[
+            Question(
+                question="Capital of France?",
+                answers=("Paris",),
+            )
+        ],
+        chat_queue=asyncio.Queue(maxsize=100),
+        question_duration_sec=1.0,
+        facebook_answer_grace_sec=grace_sec,
+    )
+
+    # Simulate the original question timer having expired.
+    engine.state = GameState.DRAINING
+    engine.current_question_index = 0
+    engine.current_deadline = time.monotonic() - 0.05
+
+    first_snapshot = engine.get_snapshot()
+
+    first_remaining = (
+        first_snapshot.facebook_grace_time_remaining
+    )
+
+    assert first_remaining is not None
+    assert 0 < first_remaining <= grace_sec
+    assert (
+        first_snapshot.facebook_grace_duration_sec
+        == grace_sec
+    )
+
+    # Let some of the grace period pass.
+    await asyncio.sleep(0.05)
+
+    second_snapshot = engine.get_snapshot()
+
+    second_remaining = (
+        second_snapshot.facebook_grace_time_remaining
+    )
+
+    assert second_remaining is not None
+    assert 0 < second_remaining < first_remaining
+
+
+def test_facebook_grace_period_does_not_extend_tiktok():
+    """Facebook gets extra answer time; TikTok does not."""
+    engine = TriviaEngine(
+        questions=[
+            Question(
+                question="Capital of France?",
+                answers=("Paris",),
+            )
+        ],
+        chat_queue=asyncio.Queue(maxsize=100),
+        question_duration_sec=10.0,
+        facebook_answer_grace_sec=3.0,
+    )
+
+    engine.state = GameState.DRAINING
+    engine.current_question_index = 0
+    engine.round_start_mono = 100.0
+    engine.current_deadline = 110.0
+
+    # This TikTok answer arrives after the normal deadline.
+    engine._handle_chat_message(
+        ChatMessage(
+            platform="tiktok",
+            user_id="tiktok-user",
+            username="TikTok User",
+            text="Paris",
+            received_at=111.0,
         )
     )
 
-    for _ in range(100):
-        if engine.state == GameState.TRANSITION:
-            break
-        await asyncio.sleep(0.005)
+    # TikTok must not receive a point during Facebook's grace period.
+    assert engine.get_snapshot().leaderboard == []
 
-    assert engine.state == GameState.TRANSITION
-    assert engine._running is True
-    assert engine.current_question_index == 0
+    # This Facebook answer arrives during the extra three seconds.
+    engine._handle_chat_message(
+        ChatMessage(
+            platform="facebook",
+            user_id="facebook-user",
+            username="Facebook User",
+            text="Paris",
+            received_at=111.0,
+        )
+    )
 
-    await engine.stop()
+    leaderboard = engine.get_snapshot().leaderboard
 
-    assert engine.state == GameState.STOPPED
-    assert engine._running is False
+    assert len(leaderboard) == 1
+    assert leaderboard[0]["platform"] == "facebook"
+    assert leaderboard[0]["display_name"] == "Facebook User"
+    assert leaderboard[0]["score"] == 1
 
-    assert engine._engine_task is not None
-    assert engine._engine_task.done()
+    # The Facebook grace deadline is exclusive.
+    engine._handle_chat_message(
+        ChatMessage(
+            platform="facebook",
+            user_id="too-late-user",
+            username="Too Late",
+            text="Paris",
+            received_at=113.0,
+        )
+    )
 
-    assert engine._queue_task is not None
-    assert engine._queue_task.done()
+    assert len(engine.get_snapshot().leaderboard) == 1

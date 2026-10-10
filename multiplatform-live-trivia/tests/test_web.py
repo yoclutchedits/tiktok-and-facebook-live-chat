@@ -85,14 +85,14 @@ def test_root_dashboard_is_available(client):
     response = client.get("/")
 
     assert response.status_code == 200
-    assert "Multiplatform LIVE Trivia" in response.text
+    assert "Learn and Earn English Quiz" in response.text
 
 
 def test_overlay_route_is_available(client):
     response = client.get("/overlay")
 
     assert response.status_code == 200
-    assert "Multiplatform LIVE Trivia" in response.text
+    assert "Learn and Earn English Quiz" in response.text
 
 
 def test_production_status_endpoint(client):
@@ -138,7 +138,7 @@ def test_cannot_start_twice(client):
     second = client.post("/game/start")
 
     assert second.status_code == 400
-    assert "Cannot start while game is" in second.json()["detail"]
+    assert "Cannot start or advance while game is" in second.json()["detail"]
 
 
 def test_production_stop_endpoint(client):

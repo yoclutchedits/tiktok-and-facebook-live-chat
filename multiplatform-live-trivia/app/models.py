@@ -19,6 +19,9 @@ class AnswerType(str, Enum):
     ROMAN_NUMERAL = "roman_numeral"
     MCQ = "mcq"
 
+class QuestionType(str, Enum):
+    QUESTION = "question"
+    WELCOME = "welcome"
 
 class GameState(str, Enum):
     IDLE = "IDLE"
@@ -75,6 +78,7 @@ class Question:
     answers: Tuple[str, ...]
     answer_type: Optional[AnswerType] = None
     options: Tuple[Tuple[str, str], ...] = ()
+    question_type: QuestionType = QuestionType.QUESTION
 
 
 @dataclass(frozen=True)
@@ -105,3 +109,6 @@ class GameSnapshot:
     time_remaining: Optional[float] = None
     correct_answer: Optional[str] = None
     options: Optional[Dict[str, str]] = None
+    facebook_grace_time_remaining: Optional[float] = None
+    facebook_grace_duration_sec: float = 0.0
+    question_type: str = "question"

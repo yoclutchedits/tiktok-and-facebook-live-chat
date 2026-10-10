@@ -35,6 +35,17 @@
   const timerDigits =
     document.getElementById("timer-digits");
 
+  // Facebook extra timer
+  const facebookGraceWrapper =
+    document.getElementById("facebook-grace-wrapper");
+
+  const facebookGraceBar =
+    document.getElementById("facebook-grace-bar");
+
+  const facebookGraceDigits =
+    document.getElementById("facebook-grace-digits");
+
+  // Separate platform leaderboards
   const tiktokLeaderboardList =
     document.getElementById("tiktok-leaderboard-list");
 
@@ -55,6 +66,9 @@
 
   const queueStats =
     document.getElementById("queue-stats");
+
+  const timerWrapper = 
+    document.querySelector(".timer-wrapper");
 
   // --------------------------------------------------------------------------
   // Timer
@@ -89,7 +103,6 @@
   // Other state
   // --------------------------------------------------------------------------
 
-  let lastLeaderboardKey = null;
   let socket = null;
   let reconnectInterval = 1000;
 
@@ -155,6 +168,15 @@
       `Q ${snap.question_number}/${snap.total_questions}`;
 
     updateStateBadge(snap.state);
+    const isWelcome = snap.question_type === "welcome";
+
+    if (timerWrapper) {
+      timerWrapper.style.display = isWelcome ? "none" : "";
+    }
+
+    if (facebookGraceWrapper && isWelcome) {
+      facebookGraceWrapper.hidden = true;
+    }
 
     if (snap.question) {
       questionBox.textContent =
@@ -197,6 +219,8 @@
           `. ${snap.options[snap.correct_answer]}`;
       }
 
+      answerText += " — Press SPACE to continue";
+
       answerReveal.textContent =
         answerText;
 
@@ -221,13 +245,14 @@
     }
 
     // ------------------------------------------------------------------------
-    // Countdown
+    // Countdown timers
     // ------------------------------------------------------------------------
 
     syncCountdown(snap);
+    syncFacebookGraceCountdown(snap);
 
     // ------------------------------------------------------------------------
-    // Leaderboard
+    // Leaderboards
     // ------------------------------------------------------------------------
 
     renderLeaderboard(snap);
@@ -317,10 +342,9 @@
   }
 
   // --------------------------------------------------------------------------
-  // Countdown
+  // Original question countdown
   //
-  // The Python backend is the source of truth.
-  // We DO NOT create a second browser countdown interval.
+  // The backend remains the source of truth.
   // --------------------------------------------------------------------------
 
   function syncCountdown(snap) {
@@ -337,13 +361,14 @@
     ) {
       timerTickSound.pause();
       timerTickSound.currentTime = 0;
+
       timerBar.style.width =
         "0%";
 
       timerDigits.textContent =
         "0";
 
-      // Play end sound when the active round finishes.
+      // Play the finish sound when the active round finishes.
       if (
         lastTimerState === "ACTIVE" &&
         (
@@ -396,8 +421,7 @@
         100,
         Math.max(
           0,
-          (remaining / QUESTION_WINDOW_SEC) *
-            100
+          (remaining / QUESTION_WINDOW_SEC) * 100
         )
       );
 
@@ -450,164 +474,242 @@
   }
 
   // --------------------------------------------------------------------------
-  // Leaderboard
+  // Facebook extra countdown
+  //
+  // Appears after the original timer expires.
+  // Its duration comes from config.json via the backend.
+  // --------------------------------------------------------------------------
+
+  function syncFacebookGraceCountdown(snap) {
+    if (
+      !facebookGraceWrapper ||
+      !facebookGraceBar ||
+      !facebookGraceDigits
+    ) {
+      return;
+    }
+
+    const duration = Math.max(
+      0,
+      Number(snap.facebook_grace_duration_sec || 0)
+    );
+
+    const remaining = Math.max(
+      0,
+      Number(snap.facebook_grace_time_remaining ?? 0)
+    );
+
+    const showTimer =
+      snap.state === "DRAINING" &&
+      duration > 0 &&
+      snap.facebook_grace_time_remaining != null;
+
+    facebookGraceWrapper.hidden =
+      !showTimer;
+
+    if (!showTimer) {
+      facebookGraceBar.style.width =
+        "0%";
+
+      facebookGraceDigits.textContent =
+        "0";
+
+      facebookGraceBar.classList.remove(
+        "warning",
+        "critical"
+      );
+
+      return;
+    }
+
+    facebookGraceDigits.textContent =
+      String(Math.ceil(remaining));
+
+    const percent =
+      Math.min(
+        100,
+        Math.max(
+          0,
+          (remaining / duration) * 100
+        )
+      );
+
+    facebookGraceBar.style.width =
+      `${percent}%`;
+
+    facebookGraceBar.classList.remove(
+      "warning",
+      "critical"
+    );
+
+    if (remaining <= 1) {
+      facebookGraceBar.classList.add(
+        "critical"
+      );
+    } else if (remaining <= 2) {
+      facebookGraceBar.classList.add(
+        "warning"
+      );
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // Leaderboards
   // --------------------------------------------------------------------------
 
   function renderLeaderboard(snap) {
-  const isFinal =
-    snap.state === "FINISHED";
+    const maxEntries = 5;
 
-  const maxEntries =
-    isFinal ? 3 : 5;
+    const players =
+      snap.leaderboard || [];
 
-  const players =
-    snap.leaderboard || [];
+    const tiktokPlayers =
+      players
+        .filter(
+          (player) =>
+            String(player.platform).toLowerCase() === "tiktok"
+        )
+        .slice(0, maxEntries);
 
-  const tiktokPlayers =
-    players
-      .filter(
-        (player) =>
-          String(player.platform).toLowerCase() === "tiktok"
-      )
-      .slice(0, maxEntries);
+    const facebookPlayers =
+      players
+        .filter(
+          (player) =>
+            String(player.platform).toLowerCase() === "facebook"
+        )
+        .slice(0, maxEntries);
 
-  const facebookPlayers =
-    players
-      .filter(
-        (player) =>
-          String(player.platform).toLowerCase() === "facebook"
-      )
-      .slice(0, maxEntries);
-
-  renderPlatformLeaderboard(
-    tiktokLeaderboardList,
-    tiktokPlayers,
-    isFinal
-  );
-
-  renderPlatformLeaderboard(
-    facebookLeaderboardList,
-    facebookPlayers,
-    isFinal
-  );
-}
-
-function renderPlatformLeaderboard(
-  container,
-  players,
-  isFinal
-) {
-  if (!container) {
-    return;
-  }
-
-  const leaderboardKey =
-    JSON.stringify(
-      players.map((player) => ({
-        name:
-          player.display_name ||
-          player.username ||
-          "Anonymous",
-        score: player.score
-      }))
+    renderPlatformLeaderboard(
+      tiktokLeaderboardList,
+      tiktokPlayers
     );
 
-  const previousKey =
-    container.dataset.leaderboardKey || "";
+    renderPlatformLeaderboard(
+      facebookLeaderboardList,
+      facebookPlayers
+    );
+  }
 
-  if (
-    previousKey === leaderboardKey
+  function renderPlatformLeaderboard(
+    container,
+    players
   ) {
-    return;
-  }
+    if (!container) {
+      return;
+    }
 
-  container.dataset.leaderboardKey =
-    leaderboardKey;
+    const leaderboardKey =
+      JSON.stringify(
+        players.map((player) => ({
+          name:
+            player.display_name ||
+            player.username ||
+            "Anonymous",
+          score: player.score
+        }))
+      );
 
-  const fragment =
-    document.createDocumentFragment();
+    const previousKey =
+      container.dataset.leaderboardKey || "";
 
-  if (players.length === 0) {
-    const empty =
-      document.createElement("div");
+    if (
+      previousKey === leaderboardKey
+    ) {
+      return;
+    }
 
-    empty.style.color =
-      "var(--text-muted)";
+    container.dataset.leaderboardKey =
+      leaderboardKey;
 
-    empty.style.fontSize =
-      "0.85rem";
+    const fragment =
+      document.createDocumentFragment();
 
-    empty.style.padding =
-      "6px 0";
+    if (players.length === 0) {
+      const empty =
+        document.createElement("div");
 
-    empty.textContent =
-      "No scores yet.";
+      empty.style.color =
+        "var(--text-muted)";
 
-    fragment.appendChild(empty);
+      empty.style.fontSize =
+        "0.85rem";
 
-  } else {
-    players.forEach(
-      (player, index) => {
-        const row =
-          document.createElement("div");
+      empty.style.padding =
+        "6px 0";
 
-        row.className =
-          "leaderboard-row";
+      empty.textContent =
+        "No scores yet.";
 
-        const playerInfo =
-          document.createElement("div");
+      fragment.appendChild(
+        empty
+      );
 
-        playerInfo.className =
-          "player-info";
+    } else {
+      players.forEach(
+        (player, index) => {
+          const row =
+            document.createElement("div");
 
-        const rank =
-          document.createElement("span");
+          row.className =
+            "leaderboard-row";
 
-        rank.className =
-          "player-rank";
+          const playerInfo =
+            document.createElement("div");
 
-        rank.textContent =
-          `#${index + 1}`;
+          playerInfo.className =
+            "player-info";
 
-        const name =
-          document.createElement("span");
+          const rank =
+            document.createElement("span");
 
-        name.className =
-          "player-name";
+          rank.className =
+            "player-rank";
 
-        name.textContent =
-          player.display_name ||
-          player.username ||
-          "Anonymous";
+          rank.textContent =
+            `#${index + 1}`;
 
-        const score =
-          document.createElement("span");
+          const name =
+            document.createElement("span");
 
-        score.className =
-          "player-score";
+          name.className =
+            "player-name";
 
-        score.textContent =
-          `${player.score} pts`;
+          name.textContent =
+            player.display_name ||
+            player.username ||
+            "Anonymous";
 
-        playerInfo.append(
-          rank,
-          name
-        );
+          const score =
+            document.createElement("span");
 
-        row.append(
-          playerInfo,
-          score
-        );
+          score.className =
+            "player-score";
 
-        fragment.appendChild(row);
-      }
+          score.textContent =
+            `${player.score} pts`;
+
+          playerInfo.append(
+            rank,
+            name
+          );
+
+          row.append(
+            playerInfo,
+            score
+          );
+
+          fragment.appendChild(
+            row
+          );
+        }
+      );
+    }
+
+    container.replaceChildren(
+      fragment
     );
   }
 
-  container.replaceChildren(
-    fragment
-  );
-}
   // --------------------------------------------------------------------------
   // Platform telemetry
   // --------------------------------------------------------------------------
@@ -650,6 +752,10 @@ function renderPlatformLeaderboard(
         ".status-text"
       );
 
+    if (!dot || !label) {
+      return;
+    }
+
     dot.className =
       "status-dot";
 
@@ -657,16 +763,12 @@ function renderPlatformLeaderboard(
       (stateStr || "")
         .toUpperCase();
 
-    if (
-      state === "CONNECTED"
-    ) {
+    if (state === "CONNECTED") {
       dot.classList.add(
         "connected"
       );
 
-    } else if (
-      state === "CONNECTING"
-    ) {
+    } else if (state === "CONNECTING") {
       dot.classList.add(
         "connecting"
       );
@@ -714,37 +816,27 @@ function renderPlatformLeaderboard(
       (state || "")
         .toLowerCase();
 
-    if (
-      normalized === "active"
-    ) {
+    if (normalized === "active") {
       stateBadge.classList.add(
         "active"
       );
 
-    } else if (
-      normalized.includes("waiting")
-    ) {
+    } else if (normalized.includes("waiting")) {
       stateBadge.classList.add(
         "waiting"
       );
 
-    } else if (
-      normalized.includes("draining")
-    ) {
+    } else if (normalized.includes("draining")) {
       stateBadge.classList.add(
         "draining"
       );
 
-    } else if (
-      normalized.includes("result")
-    ) {
+    } else if (normalized.includes("result")) {
       stateBadge.classList.add(
         "result"
       );
 
-    } else if (
-      normalized.includes("stop")
-    ) {
+    } else if (normalized.includes("stop")) {
       stateBadge.classList.add(
         "stopped"
       );
@@ -752,20 +844,22 @@ function renderPlatformLeaderboard(
   }
 
   // --------------------------------------------------------------------------
-  // START
+  // START / ADVANCE
   // --------------------------------------------------------------------------
 
   async function triggerStart() {
     if (
       !currentSnapshot ||
-      currentSnapshot.state !==
-        "WAITING_FOR_START"
+      ![
+        "WAITING_FOR_START",
+        "RESULT"
+      ].includes(currentSnapshot.state)
     ) {
       return;
     }
 
     // ------------------------------------------------------------------------
-    // Unlock browser audio using the START button interaction.
+    // Unlock browser audio using the user interaction.
     // ------------------------------------------------------------------------
 
     timerTickSound
@@ -804,7 +898,7 @@ function renderPlatformLeaderboard(
 
     } catch (error) {
       console.error(
-        "Failed to start game:",
+        "Failed to start or advance game:",
         error
       );
     }
@@ -858,7 +952,7 @@ function renderPlatformLeaderboard(
   }
 
   // --------------------------------------------------------------------------
-  // Spacebar START
+  // Spacebar: START a round or advance from RESULT
   // --------------------------------------------------------------------------
 
   window.addEventListener(
@@ -879,7 +973,19 @@ function renderPlatformLeaderboard(
 
         if (
           tag === "INPUT" ||
-          tag === "TEXTAREA"
+          tag === "TEXTAREA" ||
+          tag === "BUTTON" ||
+          event.repeat
+        ) {
+          return;
+        }
+
+        if (
+          !currentSnapshot ||
+          ![
+            "WAITING_FOR_START",
+            "RESULT"
+          ].includes(currentSnapshot.state)
         ) {
           return;
         }

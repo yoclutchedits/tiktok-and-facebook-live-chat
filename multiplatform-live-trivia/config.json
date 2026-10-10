@@ -8,6 +8,8 @@
   },
 
   "timing": {
+    "facebook_tolerance_sec": 1.0,
+    "facebook_answer_grace_sec": 10.0,
     "drain_idle_sec": 0.05,
     "drain_hard_cap_sec": 1.5
   },

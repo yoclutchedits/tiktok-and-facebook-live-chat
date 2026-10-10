@@ -68,7 +68,16 @@ body.overlay-mode .app-container {
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
   transition: all 0.3s ease;
 }
-
+/* App title */
+.app-title {
+  font-size: 1.6rem;
+  font-weight: 800;
+  text-align: center;
+  letter-spacing: 0.03em;
+  color: var(--accent-cyan);
+  margin-bottom: 22px;
+  line-height: 1.3;
+}
 /* --------------------------------------------------------------------------
    Header & Status Bar
    -------------------------------------------------------------------------- */
@@ -376,4 +385,26 @@ body.overlay-mode .app-container {
   letter-spacing: 0.05em;
   color: var(--text-muted);
   margin-bottom: 10px;
+}
+/* Facebook extra countdown */
+.facebook-grace-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.facebook-grace-wrapper[hidden] {
+  display: none !important;
+}
+
+.facebook-grace-label {
+  color: var(--accent-cyan);
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.facebook-grace-fill {
+  background: var(--accent-cyan);
 }

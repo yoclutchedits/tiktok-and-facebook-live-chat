@@ -166,6 +166,11 @@ async def lifespan(app: FastAPI):
                 10.0,
             )
         ),
+        facebook_answer_grace_sec=float(
+            timing_cfg.get
+                ("facebook_answer_grace_sec", 
+                    3.0)
+        ),
         result_duration_sec=float(
             game_cfg.get(
                 "result_duration_sec",
@@ -395,11 +400,14 @@ async def start_game():
             detail="Game engine is not initialized.",
         )
 
-    if engine.state != GameState.WAITING_FOR_START:
+    if engine.state not in (
+        GameState.WAITING_FOR_START,
+        GameState.RESULT,
+    ):
         raise HTTPException(
             status_code=400,
             detail=(
-                "Cannot start while game is "
+                "Cannot start or advance while game is "
                 f"in {engine.state.value} state."
             ),
         )

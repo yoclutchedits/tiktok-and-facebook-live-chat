@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, List
 
 from app.core.matcher import normalize_text
-from app.models import AnswerType, Question
+from app.models import AnswerType, Question, QuestionType
 
 
 def validate_and_parse_questions(raw_data: List[dict[str, Any]]) -> List[Question]:
@@ -34,6 +34,37 @@ def validate_and_parse_questions(raw_data: List[dict[str, Any]]) -> List[Questio
             )
 
         seen_questions.add(norm_q)
+                # --------------------------------------------------------------
+        # Question type
+        # --------------------------------------------------------------
+        raw_question_type = item.get(
+            "question_type",
+            "question",
+        )
+
+        try:
+            question_type = QuestionType(
+                str(raw_question_type).strip().lower()
+            )
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid question_type '{raw_question_type}' "
+                f"for question '{q_text_str}'. "
+                "Expected 'question' or 'welcome'."
+            ) from exc
+
+        # Welcome screens don't need answers or options.
+        if question_type == QuestionType.WELCOME:
+            questions.append(
+                Question(
+                    question=q_text_str,
+                    answers=(),
+                    answer_type=None,
+                    options=(),
+                    question_type=QuestionType.WELCOME,
+                )
+            )
+            continue
 
         # --------------------------------------------------------------
         # Answer type
@@ -159,6 +190,7 @@ def validate_and_parse_questions(raw_data: List[dict[str, Any]]) -> List[Questio
                 answers=tuple(clean_answers),
                 answer_type=ans_type,
                 options=tuple(options),
+                question_type=question_type,
             )
         )
 

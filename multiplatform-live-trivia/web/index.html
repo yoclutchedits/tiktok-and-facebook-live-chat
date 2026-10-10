@@ -3,65 +3,136 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Multiplatform LIVE Trivia</title>
+  <title>Learn and Earn English Quiz</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
   <div class="app-container">
+    <h1 class="app-title">Learn and Earn English Quiz</h1>
+
     <!-- Header with Question Progress and State -->
     <header class="header-bar">
-      <span id="question-count" class="question-counter">Q 0/0</span>
-      <span id="state-badge" class="state-badge">IDLE</span>
+      <span id="question-count" class="question-counter">
+        Q 0/0
+      </span>
+      <span id="state-badge" class="state-badge">
+        IDLE
+      </span>
     </header>
 
-    <!-- Question Box & 10s Monotonic Bar -->
+    <!-- Question Box and Timers -->
     <main class="question-card">
-      <div id="question-box" class="question-text">Loading question engine...</div>
+      <div id="question-box" class="question-text">
+        Loading question engine...
+      </div>
+
       <div id="options-box" class="options-box"></div>
+
       <div id="answer-reveal" class="answer-reveal"></div>
-      
+
+      <!-- Original question timer -->
       <div class="timer-wrapper">
         <div class="timer-bar-container">
-          <div id="timer-bar" class="timer-bar-fill"></div>
+          <div
+            id="timer-bar"
+            class="timer-bar-fill"
+          ></div>
         </div>
-        <span id="timer-digits" class="timer-digits">10</span>
+
+        <span id="timer-digits" class="timer-digits">
+          10
+        </span>
+      </div>
+
+      <!-- Facebook extra timer -->
+      <div
+        id="facebook-grace-wrapper"
+        class="facebook-grace-wrapper"
+        hidden
+      >
+        <span class="facebook-grace-label">
+          Facebook extra time
+        </span>
+
+        <div class="timer-bar-container">
+          <div
+            id="facebook-grace-bar"
+            class="timer-bar-fill facebook-grace-fill"
+          ></div>
+        </div>
+
+        <span
+          id="facebook-grace-digits"
+          class="timer-digits"
+        >0</span>
       </div>
     </main>
 
-    <!-- Host Admin Controls (Auto-hidden in /overlay mode) -->
+    <!-- Host Admin Controls -->
     <section id="host-controls" class="control-grid">
-      <button id="btn-start" class="btn btn-start" disabled>
-        ▶ START ROUND <span class="hotkey-hint">[SPACE]</span>
+      <button
+        id="btn-start"
+        class="btn btn-start"
+        disabled
+      >
+        ▶ START ROUND
+        <span class="hotkey-hint">[SPACE]</span>
       </button>
     </section>
 
-    <!-- Leaderboard View -->
+    <!-- Separate Platform Leaderboards -->
     <section class="leaderboard-section">
       <div class="leaderboard-panel">
         <h3>TikTok Leaderboard</h3>
-        <div id="tiktok-leaderboard-list" class="leaderboard-list"></div>
+        <div
+          id="tiktok-leaderboard-list"
+          class="leaderboard-list"
+        ></div>
       </div>
 
       <div class="leaderboard-panel">
         <h3>Facebook Leaderboard</h3>
-        <div id="facebook-leaderboard-list" class="leaderboard-list"></div>
+        <div
+          id="facebook-leaderboard-list"
+          class="leaderboard-list"
+        ></div>
       </div>
-  </section>
+    </section>
 
-    <!-- System Telemetry (Auto-hidden in /overlay mode) -->
-    <footer id="system-telemetry" class="system-telemetry">
+    <!-- System Telemetry -->
+    <footer
+      id="system-telemetry"
+      class="system-telemetry"
+    >
       <div class="platform-badges">
-        <div id="tiktok-status" class="telemetry-tag">
+        <div
+          id="tiktok-status"
+          class="telemetry-tag"
+        >
           <span class="status-dot"></span>
-          <span>TikTok: <strong class="status-text">OFFLINE</strong></span>
+          <span>
+            TikTok:
+            <strong class="status-text">OFFLINE</strong>
+          </span>
         </div>
-        <div id="fb-status" class="telemetry-tag">
+
+        <div
+          id="fb-status"
+          class="telemetry-tag"
+        >
           <span class="status-dot"></span>
-          <span>Facebook: <strong class="status-text">OFFLINE</strong></span>
+          <span>
+            Facebook:
+            <strong class="status-text">OFFLINE</strong>
+          </span>
         </div>
       </div>
-      <div id="queue-stats">Queue: 0/10000</div>
+
+      <div id="queue-stats">
+        Queue: 0/10000
+      </div>
     </footer>
+
   </div>
 
   <script src="/static/app.js"></script>

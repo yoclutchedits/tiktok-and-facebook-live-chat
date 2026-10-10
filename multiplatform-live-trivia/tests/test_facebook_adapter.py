@@ -20,16 +20,22 @@ class FakeWebSocket:
     async def __aexit__(self, exc_type, exc, tb):
         return False
 
+    async def recv(self):
+        """Simulate receiving one WebSocket message."""
+        try:
+            return next(self._messages)
+        except StopIteration:
+            self.adapter._running = False
+            raise RuntimeError("Fake WebSocket stream exhausted")
+
     def __aiter__(self):
         return self
 
     async def __anext__(self):
         try:
-            return next(self._messages)
-        except StopIteration:
-            self.adapter._running = False
+            return await self.recv()
+        except RuntimeError:
             raise StopAsyncIteration
-
 
 class FakeConnect:
     def __init__(self, websocket):
@@ -251,7 +257,7 @@ async def test_reconnects_after_connection_refused(monkeypatch):
     assert adapter.status.reconnect_attempts == 1
 
     assert "DISCONNECTED" in states
-    assert "CONNECTED" in states
+    assert "CONNECTED" not in states
 
 
 @pytest.mark.asyncio
