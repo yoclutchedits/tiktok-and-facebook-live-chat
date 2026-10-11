@@ -115,14 +115,14 @@ def test_root_dashboard_is_available(client):
     response = client.get("/")
 
     assert response.status_code == 200
-    assert "Learn and Earn English Quiz" in response.text
+    assert "Learn and Earn English Quiz With Sanukaji" in response.text
 
 
 def test_overlay_route_is_available(client):
     response = client.get("/overlay")
 
     assert response.status_code == 200
-    assert "Learn and Earn English Quiz" in response.text
+    assert "Learn and Earn English Quiz With Sanukaji" in response.text
 
 
 def test_production_status_endpoint(client):
