@@ -35,8 +35,8 @@ class FacebookAdapter:
     chat message is actually received.
     """
 
-    # Maximum amount of time we allow the WebSocket to remain silent
-    # before considering the Facebook connection inactive.
+    # How long the WebSocket may stay silent before a one-time warning
+    # is shown. Silence never triggers a reconnect.
     NO_DATA_TIMEOUT_SEC = 15.0
 
     def __init__(
@@ -64,6 +64,7 @@ class FacebookAdapter:
 
         # True only after an actual Facebook chat message has arrived.
         self._received_facebook_data = False
+        self._warned_no_data = False
 
     def _update_status(
         self,
@@ -208,6 +209,7 @@ class FacebookAdapter:
 
         while self._running:
             self._received_facebook_data = False
+            self._warned_no_data = False
 
             try:
                 self._update_status(
@@ -240,26 +242,31 @@ class FacebookAdapter:
                             )
 
                         except asyncio.TimeoutError:
-                            if self._received_facebook_data:
+                            # A quiet chat is normal. Do NOT drop the
+                            # socket: reconnecting loses any answer sent
+                            # during the gap. Dead connections are caught
+                            # by the websocket ping / ConnectionClosed.
+                            if (
+                                not self._received_facebook_data
+                                and not self._warned_no_data
+                            ):
+                                self._warned_no_data = True
+
                                 self._update_status(
-                                    PlatformStatusType.DISCONNECTED,
-                                    "Facebook chat stopped sending data",
-                                )
-                            else:
-                                self._update_status(
-                                    PlatformStatusType.DISCONNECTED,
-                                    "No Facebook chat data received; "
-                                    "check the Social Stream Ninja extension "
-                                    "and session ID",
+                                    PlatformStatusType.CONNECTING,
+                                    "Connected to Social Stream Ninja; "
+                                    "no Facebook chat yet - check the "
+                                    "extension and session ID",
                                 )
 
-                            logger.warning(
-                                "No Facebook chat data received from "
-                                "Social Stream Ninja for %.1f seconds.",
-                                self.NO_DATA_TIMEOUT_SEC,
-                            )
+                                logger.warning(
+                                    "No Facebook chat data from Social "
+                                    "Stream Ninja after %.1f seconds; "
+                                    "still waiting.",
+                                    self.NO_DATA_TIMEOUT_SEC,
+                                )
 
-                            break
+                            continue
 
                         if not self._running:
                             break

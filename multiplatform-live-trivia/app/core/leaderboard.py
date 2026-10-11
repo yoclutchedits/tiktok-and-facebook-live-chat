@@ -58,5 +58,42 @@ class LeaderboardManager:
             for p in sorted_players
         ]
 
+    def restore(self, entries: List[Dict]) -> int:
+        """Restore players from a previously saved leaderboard list.
+
+        ``score_reached_at`` is a monotonic clock value that is meaningless
+        after a restart, so restored players get negative values that keep
+        their saved ranking and always sort before anyone who scores later.
+        Returns the number of players restored.
+        """
+        restored = 0
+        total = len(entries)
+
+        for rank, entry in enumerate(entries):
+            try:
+                platform = str(entry["platform"])
+                user_id = str(entry["platform_user_id"])
+                score = int(entry["score"])
+                display_name = str(
+                    entry.get("display_name") or user_id
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+
+            if score <= 0:
+                continue
+
+            key = f"{platform}:{user_id}"
+            self.players[key] = Player(
+                platform=platform,
+                platform_user_id=user_id,
+                display_name=display_name,
+                score=score,
+                score_reached_at=float(rank - total - 1),
+            )
+            restored += 1
+
+        return restored
+
     def reset(self) -> None:
         self.players.clear()

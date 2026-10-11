@@ -5,10 +5,10 @@ import asyncio
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Callable, Optional, Set
+from typing import Callable, Dict, Optional, Set
 
 from app.core.leaderboard import LeaderboardManager
-from app.core.matcher import match_answer
+from app.core.matcher import match_answer, normalize_text
 from app.models import (
     ChatMessage,
     GameCommand,
@@ -52,6 +52,7 @@ class TriviaEngine:
         drain_idle_sec: float = 0.05,
         drain_hard_cap_sec: float = 1.5,
         facebook_answer_grace_sec: float = 0.0,
+        max_text_attempts: int = 1,
     ) -> None:
         self.questions = questions
         self.chat_queue = chat_queue
@@ -93,6 +94,11 @@ class TriviaEngine:
             float(drain_hard_cap_sec),
         )
 
+        # Attempts allowed per user per non-MCQ question. MCQ questions only
+        # count messages that are a valid option, so chit-chat never burns
+        # an attempt.
+        self.max_text_attempts = max(1, int(max_text_attempts))
+
         self.snapshot_callback = snapshot_callback
 
         self.state = GameState.IDLE
@@ -108,7 +114,10 @@ class TriviaEngine:
         # This does not terminate a question.
         self.question_winner: Optional[dict] = None
 
-        # One attempt per platform/user per question.
+        # Attempts used per platform/user for the current question.
+        self.attempts_this_question: Dict[str, int] = {}
+
+        # Users who already scored on the current question.
         self.answered_users_this_question: Set[str] = set()
 
         self._engine_task: Optional[asyncio.Task] = None
@@ -309,6 +318,7 @@ class TriviaEngine:
 
         self.question_winner = None
         self.answered_users_this_question.clear()
+        self.attempts_this_question.clear()
 
         self.round_start_mono = time.monotonic()
         self.round_start_wall_utc = datetime.now(
@@ -608,15 +618,8 @@ class TriviaEngine:
                 return
 
         # --------------------------------------------------------------
-        # One attempt per user/platform per question
+        # Attempt limits
         # --------------------------------------------------------------
-
-        user_key = f"{platform}:{msg.user_id}"
-
-        if user_key in self.answered_users_this_question:
-            return
-
-        self.answered_users_this_question.add(user_key)
 
         if not self.questions:
             return
@@ -631,6 +634,28 @@ class TriviaEngine:
         # Welcome entries cannot score.
         if question.question_type == QuestionType.WELCOME:
             return
+
+        user_key = f"{platform}:{msg.user_id}"
+
+        # Already scored on this question.
+        if user_key in self.answered_users_this_question:
+            return
+
+        # MCQ: only a message that is a valid option (label or option
+        # text) is an attempt; "hi", "lol" etc. are ignored entirely.
+        if question.options:
+            if not self._is_mcq_option(question, msg.text):
+                return
+            max_attempts = 1
+        else:
+            max_attempts = self.max_text_attempts
+
+        used = self.attempts_this_question.get(user_key, 0)
+
+        if used >= max_attempts:
+            return
+
+        self.attempts_this_question[user_key] = used + 1
 
         explicit_type = (
             question.answer_type.name
@@ -650,6 +675,8 @@ class TriviaEngine:
         # --------------------------------------------------------------
         # Award the point
         # --------------------------------------------------------------
+
+        self.answered_users_this_question.add(user_key)
 
         player = self.leaderboard_mgr.record_score(
             platform=platform,
@@ -673,6 +700,23 @@ class TriviaEngine:
         )
 
         self._notify_snapshot()
+
+    @staticmethod
+    def _is_mcq_option(question: Question, text: str) -> bool:
+        """True if text is one of the question's option labels or texts."""
+        cleaned = normalize_text(text)
+
+        if not cleaned:
+            return False
+
+        for label, option_text in question.options:
+            if cleaned == normalize_text(label):
+                return True
+
+            if cleaned == normalize_text(option_text):
+                return True
+
+        return False
 
     # ------------------------------------------------------------------
     # Snapshot

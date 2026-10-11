@@ -79,20 +79,51 @@ def total_dropped_messages(
 active_websockets: set[WebSocket] = set()
 
 
+async def _send_one(websocket: WebSocket, payload: str) -> bool:
+    try:
+        await asyncio.wait_for(websocket.send_text(payload), timeout=2.0)
+        return True
+    except Exception:
+        return False
+
+
 async def broadcast_snapshot(snapshot: GameSnapshot) -> None:
     if not active_websockets:
         return
 
     payload = json.dumps(asdict(snapshot))
-    dead_websockets: set[WebSocket] = set()
 
-    for websocket in active_websockets:
-        try:
-            await websocket.send_text(payload)
-        except Exception:
-            dead_websockets.add(websocket)
+    # Iterate over a copy: clients connect/disconnect while we await, and
+    # mutating the live set mid-iteration raises RuntimeError. Send to all
+    # clients concurrently so one slow client cannot stall the others.
+    clients = list(active_websockets)
+    results = await asyncio.gather(
+        *(_send_one(ws, payload) for ws in clients)
+    )
 
-    active_websockets.difference_update(dead_websockets)
+    for websocket, ok in zip(clients, results):
+        if not ok:
+            active_websockets.discard(websocket)
+
+
+def load_saved_leaderboard() -> list[dict]:
+    """Read the leaderboard saved by a previous run (empty list if none)."""
+    path = DATA_DIR / "leaderboard.json"
+
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError):
+        logger.warning(
+            "Could not read %s; starting with an empty leaderboard.",
+            path,
+            exc_info=True,
+        )
+        return []
+
+    return data if isinstance(data, list) else []
 
 
 def persist_leaderboard(snapshot: GameSnapshot) -> None:
@@ -154,6 +185,27 @@ async def lifespan(app: FastAPI):
     questions = load_questions(questions_path)
 
     # --------------------------------------------------------------
+    # Facebook is only active when enabled AND a session id is set.
+    # Without it there is nothing to wait for, so no grace period.
+    # --------------------------------------------------------------
+
+    facebook_session_id = (
+        fb_cfg.get("session_id", "")
+        or ""
+    ).strip()
+
+    facebook_active = bool(
+        fb_cfg.get("enabled", True)
+        and facebook_session_id
+    )
+
+    if fb_cfg.get("enabled", True) and not facebook_session_id:
+        logger.warning(
+            "Facebook is enabled in config.json but session_id is "
+            "empty; Facebook chat is OFF."
+        )
+
+    # --------------------------------------------------------------
     # Engine
     # --------------------------------------------------------------
 
@@ -166,10 +218,18 @@ async def lifespan(app: FastAPI):
                 10.0,
             )
         ),
-        facebook_answer_grace_sec=float(
-            timing_cfg.get
-                ("facebook_answer_grace_sec", 
-                    3.0)
+        facebook_answer_grace_sec=(
+            float(
+                timing_cfg.get(
+                    "facebook_answer_grace_sec",
+                    3.0,
+                )
+            )
+            if facebook_active
+            else 0.0
+        ),
+        max_text_attempts=int(
+            game_cfg.get("max_text_attempts", 1)
         ),
         result_duration_sec=float(
             game_cfg.get(
@@ -202,6 +262,21 @@ async def lifespan(app: FastAPI):
             )
         ),
     )
+
+    # Resume scores from the previous run instead of wiping them.
+    # Set game.resume_leaderboard to false (or delete
+    # data/leaderboard.json) to start a fresh game.
+    if game_cfg.get("resume_leaderboard", True):
+        restored = engine.leaderboard_mgr.restore(
+            load_saved_leaderboard()
+        )
+
+        if restored:
+            logger.info(
+                "Restored %d player(s) from the saved leaderboard.",
+                restored,
+            )
+
     persist_leaderboard(engine.get_snapshot())
 
     app.state.engine = engine
@@ -225,15 +300,7 @@ async def lifespan(app: FastAPI):
 
     facebook_adapter: FacebookAdapter | None = None
 
-    facebook_session_id = (
-        fb_cfg.get("session_id", "")
-        or ""
-    ).strip()
-
-    if (
-        fb_cfg.get("enabled", True)
-        and facebook_session_id
-    ):
+    if facebook_active:
         facebook_adapter = FacebookAdapter(
             session_id=facebook_session_id,
             chat_queue=chat_queue,
@@ -259,6 +326,9 @@ async def lifespan(app: FastAPI):
             )
         )
 
+    app.state.tiktok_adapter = tiktok_adapter
+    app.state.facebook_adapter = facebook_adapter
+
     engine.start()
 
     # --------------------------------------------------------------
@@ -269,38 +339,53 @@ async def lifespan(app: FastAPI):
         last_persisted_state = None
 
         while True:
-            snapshot = engine.get_snapshot()
+            # One bad tick (disk error, odd client) must never kill the
+            # loop: it feeds every connected dashboard.
+            try:
+                snapshot = engine.get_snapshot()
 
-            snapshot.platforms = build_platform_snapshot(
-                tiktok_adapter,
-                facebook_adapter,
-            )
+                snapshot.platforms = build_platform_snapshot(
+                    tiktok_adapter,
+                    facebook_adapter,
+                )
 
-            snapshot.dropped_messages = total_dropped_messages(
-                tiktok_adapter,
-                facebook_adapter,
-            )
+                snapshot.dropped_messages = total_dropped_messages(
+                    tiktok_adapter,
+                    facebook_adapter,
+                )
 
-            await broadcast_snapshot(snapshot)
+                await broadcast_snapshot(snapshot)
 
-            if (
-                snapshot.state in (
+                if (
+                    snapshot.state in (
+                        GameState.RESULT.value,
+                        GameState.FINISHED.value,
+                    )
+                    and snapshot.state != last_persisted_state
+                ):
+                    try:
+                        persist_leaderboard(snapshot)
+                        last_persisted_state = snapshot.state
+                    except Exception:
+                        logger.exception(
+                            "Failed to save the leaderboard; "
+                            "will retry."
+                        )
+
+                if snapshot.state not in (
                     GameState.RESULT.value,
                     GameState.FINISHED.value,
-                )
-                and snapshot.state != last_persisted_state
-            ):
-                persist_leaderboard(snapshot)
-                last_persisted_state = snapshot.state
+                ):
+                    last_persisted_state = None
 
-            if snapshot.state not in (
-                GameState.RESULT.value,
-                GameState.FINISHED.value,
-            ):
-                last_persisted_state = None
+                if snapshot.state == GameState.STOPPED.value:
+                    break
 
-            if snapshot.state == GameState.STOPPED.value:
-                break
+            except asyncio.CancelledError:
+                raise
+
+            except Exception:
+                logger.exception("Broadcast loop tick failed.")
 
             await asyncio.sleep(0.1)
 
@@ -381,9 +466,17 @@ async def get_status():
             {"status": "starting"}
         )
 
-    return JSONResponse(
-        asdict(engine.get_snapshot())
+    snapshot = engine.get_snapshot()
+    snapshot.platforms = build_platform_snapshot(
+        getattr(app.state, "tiktok_adapter", None),
+        getattr(app.state, "facebook_adapter", None),
     )
+    snapshot.dropped_messages = total_dropped_messages(
+        getattr(app.state, "tiktok_adapter", None),
+        getattr(app.state, "facebook_adapter", None),
+    )
+
+    return JSONResponse(asdict(snapshot))
 
 
 @app.post("/game/start")

@@ -5,7 +5,7 @@ from app.core.matcher import match_answer
 def test_text_fuzzy_and_exact():
     assert match_answer("Paris", ["Paris"])
     assert match_answer("paris!!!", ["Paris"])
-    assert match_answer("Pariss", ["Paris"])  # rapidfuzz score >= 85
+    assert match_answer("Pariss", ["Paris"])  # rapidfuzz score >= 90
     assert not match_answer("London", ["Paris"])
 
 
@@ -68,3 +68,25 @@ def test_roman_answers_are_exact():
     assert match_answer("iv", ["IV"])
     assert not match_answer("VI", ["IV"])
     assert not match_answer("IIII", ["IV"])
+
+def test_numbers_keep_sign_and_decimal_point():
+    assert not match_answer("-5", ["5"])
+    assert not match_answer("5", ["-5"])
+    assert match_answer("-5", ["-5"])
+    assert not match_answer("3.14", ["314"])
+    assert not match_answer("1.5", ["15"])
+    assert match_answer("3.14", ["3,14"])
+    assert match_answer("1.234.567", ["1234567"])
+
+
+def test_non_finite_values_are_not_numbers():
+    assert not match_answer("nan", ["5"])
+    assert not match_answer("snan", ["5"])
+    assert not match_answer("inf", ["5"])
+    assert match_answer("Nan", ["Nan"])  # a normal text answer
+
+
+def test_similar_country_names_are_not_confused():
+    assert not match_answer("Australia", ["Austria"])
+    assert not match_answer("Austria", ["Australia"])
+    assert match_answer("Hungry", ["Hungary"])  # one-letter typo still accepted

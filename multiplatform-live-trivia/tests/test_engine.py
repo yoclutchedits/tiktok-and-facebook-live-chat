@@ -692,3 +692,79 @@ def test_facebook_grace_period_does_not_extend_tiktok():
     )
 
     assert len(engine.get_snapshot().leaderboard) == 1
+
+MCQ_OPTIONS = (("A", "London"), ("B", "Paris"), ("C", "Berlin"), ("D", "Madrid"))
+
+
+def make_mcq_engine():
+    from app.models import AnswerType
+
+    return make_engine(
+        [
+            Question(
+                question="Capital of France?",
+                answers=("B",),
+                answer_type=AnswerType.MCQ,
+                options=MCQ_OPTIONS,
+            )
+        ]
+    )
+
+
+def test_mcq_chit_chat_does_not_burn_the_attempt():
+    engine = make_mcq_engine()
+    prepare_active_round(engine)
+
+    for text, t in (("hi", 101.0), ("lol first!", 101.5), ("is it hard?", 102.0)):
+        engine._handle_chat_message(
+            make_message(user_id="u1", text=text, received_at=t)
+        )
+
+    engine._handle_chat_message(
+        make_message(user_id="u1", text="b", received_at=103.0)
+    )
+
+    board = engine.get_snapshot().leaderboard
+    assert len(board) == 1 and board[0]["score"] == 1
+
+
+def test_mcq_wrong_option_uses_the_single_attempt():
+    engine = make_mcq_engine()
+    prepare_active_round(engine)
+
+    engine._handle_chat_message(
+        make_message(user_id="u1", text="A", received_at=101.0)
+    )
+    engine._handle_chat_message(
+        make_message(user_id="u1", text="B", received_at=102.0)
+    )
+
+    assert engine.get_snapshot().leaderboard == []
+
+
+def test_correct_user_cannot_score_twice_with_extra_attempts():
+    engine = make_engine([Question(question="Capital?", answers=("Paris",))])
+    engine.max_text_attempts = 3
+    prepare_active_round(engine)
+
+    for t in (101.0, 102.0, 103.0):
+        engine._handle_chat_message(
+            make_message(user_id="u1", text="Paris", received_at=t)
+        )
+
+    assert engine.get_snapshot().leaderboard[0]["score"] == 1
+
+
+def test_text_attempts_are_configurable():
+    engine = make_engine([Question(question="Capital?", answers=("Paris",))])
+    engine.max_text_attempts = 2
+    prepare_active_round(engine)
+
+    engine._handle_chat_message(
+        make_message(user_id="u1", text="hello", received_at=101.0)
+    )
+    engine._handle_chat_message(
+        make_message(user_id="u1", text="Paris", received_at=102.0)
+    )
+
+    assert engine.get_snapshot().leaderboard[0]["score"] == 1

@@ -1,33 +1,29 @@
 {
   "questions_file": "questions.json",
-
   "game": {
     "question_duration_sec": 15.0,
     "result_duration_sec": 5.0,
-    "transition_duration_sec": 3.0
+    "transition_duration_sec": 3.0,
+    "max_text_attempts": 1,
+    "resume_leaderboard": true
   },
-
   "timing": {
     "facebook_tolerance_sec": 1.0,
     "facebook_answer_grace_sec": 10.0,
     "drain_idle_sec": 0.05,
     "drain_hard_cap_sec": 1.5
   },
-
   "queues": {
     "chat_maxsize": 10000
   },
-
   "tiktok": {
     "enabled": true,
     "username": "@sanukajishrestha22"
   },
-
   "facebook": {
-  "enabled": true,
-  "session_id": ""
-},
-
+    "enabled": true,
+    "session_id": "fgfgfg"
+  },
   "web": {
     "host": "127.0.0.1",
     "port": 8000

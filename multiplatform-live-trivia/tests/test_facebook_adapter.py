@@ -294,3 +294,40 @@ async def test_invalid_json_is_ignored(monkeypatch):
     message = queue.get_nowait()
 
     assert message.text == "Paris"
+
+@pytest.mark.asyncio
+async def test_quiet_chat_does_not_force_a_reconnect(monkeypatch):
+    """A silent period must not drop the socket (answers would be lost)."""
+    queue = asyncio.Queue(maxsize=10)
+    adapter = FacebookAdapter(session_id="test-session", chat_queue=queue)
+    adapter.NO_DATA_TIMEOUT_SEC = 0.01
+    connects = 0
+
+    class SlowSocket(FakeWebSocket):
+        def __init__(self, adapter):
+            super().__init__([], adapter)
+            self.calls = 0
+
+        async def recv(self):
+            self.calls += 1
+            if self.calls <= 3:
+                await asyncio.sleep(1)  # silence -> wait_for times out
+            if self.calls == 4:
+                return facebook_payload(message_id="late-1", text="Paris")
+            self.adapter._running = False
+            raise RuntimeError("Fake WebSocket stream exhausted")
+
+    socket = SlowSocket(adapter)
+
+    def fake_connect(*args, **kwargs):
+        nonlocal connects
+        connects += 1
+        return FakeConnect(socket)
+
+    monkeypatch.setattr(facebook_module.websockets, "connect", fake_connect)
+
+    adapter._running = True
+    await adapter._listen_loop()
+
+    assert connects == 1  # no reconnect during the silence
+    assert queue.qsize() == 1  # message after the quiet gap still arrives
