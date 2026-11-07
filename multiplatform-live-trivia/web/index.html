@@ -8,135 +8,209 @@
 </head>
 <body>
   <div class="app-container">
-    <!-- Header with Question Progress and State -->
     <header class="header-bar">
-      <span id="question-count" class="question-counter">
-        Q 0/0
-      </span>
-      <span id="state-badge" class="state-badge">
-        IDLE
-      </span>
+      <span id="question-count" class="question-counter">Q 0/0</span>
+      <span id="state-badge" class="state-badge">IDLE</span>
     </header>
 
     <h1 class="app-title">Learn and Earn English Quiz With Sanukaji</h1>
     <h2 class="app-subtitle">Part 4</h2>
 
+    <nav id="main-navigation" class="main-navigation" aria-label="Main navigation">
+      <button type="button" class="nav-tab active" data-view="dashboard-view">Dashboard</button>
+      <button type="button" class="nav-tab" data-view="settings-view">Settings</button>
+    </nav>
 
-    <!-- Question Box and Timers -->
-    <main class="question-card">
-      <div id="question-box" class="question-text">
-        Loading question engine...
-      </div>
+    <section id="dashboard-view" class="main-view">
+      <main class="question-card">
+        <div id="question-box" class="question-text">Loading question engine...</div>
+        <div id="options-box" class="options-box"></div>
+        <div id="answer-reveal" class="answer-reveal"></div>
 
-      <div id="options-box" class="options-box"></div>
-
-      <div id="answer-reveal" class="answer-reveal"></div>
-
-      <!-- Original question timer -->
-      <div class="timer-wrapper">
-        <div class="timer-bar-container">
-          <div
-            id="timer-bar"
-            class="timer-bar-fill"
-          ></div>
+        <div class="timer-wrapper">
+          <div class="timer-bar-container"><div id="timer-bar" class="timer-bar-fill"></div></div>
+          <span id="timer-digits" class="timer-digits">10</span>
         </div>
 
-        <span id="timer-digits" class="timer-digits">
-          10
-        </span>
-      </div>
-
-      <!-- Facebook extra timer -->
-      <div
-        id="facebook-grace-wrapper"
-        class="facebook-grace-wrapper"
-        hidden
-      >
-        <span class="facebook-grace-label">
-          Facebook extra time
-        </span>
-
-        <div class="timer-bar-container">
-          <div
-            id="facebook-grace-bar"
-            class="timer-bar-fill facebook-grace-fill"
-          ></div>
+        <div id="facebook-grace-wrapper" class="facebook-grace-wrapper" hidden>
+          <span class="facebook-grace-label">Facebook extra time</span>
+          <div class="timer-bar-container"><div id="facebook-grace-bar" class="timer-bar-fill facebook-grace-fill"></div></div>
+          <span id="facebook-grace-digits" class="timer-digits">0</span>
         </div>
+      </main>
 
-        <span
-          id="facebook-grace-digits"
-          class="timer-digits"
-        >0</span>
-      </div>
-    </main>
+      <section id="host-controls" class="control-grid">
+        <button id="btn-start" class="btn btn-start" disabled>
+          ▶ START ROUND <span class="hotkey-hint">[SPACE]</span>
+        </button>
+        <button id="btn-stop" class="btn btn-stop" type="button">■ STOP</button>
+      </section>
 
-    <!-- Host Admin Controls -->
-    <section id="host-controls" class="control-grid">
-      <button
-        id="btn-start"
-        class="btn btn-start"
-        disabled
-      >
-        ▶ START ROUND
-        <span class="hotkey-hint">[SPACE]</span>
-      </button>
+      <section class="leaderboard-section">
+        <div class="leaderboard-panel">
+          <h3>TikTok Leaderboard</h3>
+          <div id="tiktok-leaderboard-list" class="leaderboard-list"></div>
+        </div>
+        <div class="leaderboard-panel">
+          <h3>Facebook Leaderboard</h3>
+          <div id="facebook-leaderboard-list" class="leaderboard-list"></div>
+        </div>
+      </section>
+
+      <footer id="system-telemetry" class="system-telemetry">
+        <div class="platform-badges">
+          <div id="tiktok-status" class="telemetry-tag">
+            <span class="status-dot"></span>
+            <span>TikTok: <strong class="status-text">OFFLINE</strong></span>
+          </div>
+          <div id="fb-status" class="telemetry-tag">
+            <span class="status-dot"></span>
+            <span>Facebook: <strong class="status-text">OFFLINE</strong></span>
+          </div>
+        </div>
+        <div id="queue-stats">Queue: 0/10000</div>
+      </footer>
     </section>
 
-    <!-- Separate Platform Leaderboards -->
-    <section class="leaderboard-section">
-      <div class="leaderboard-panel">
-        <h3>TikTok Leaderboard</h3>
-        <div
-          id="tiktok-leaderboard-list"
-          class="leaderboard-list"
-        ></div>
+    <section id="settings-view" class="main-view" hidden>
+      <div class="settings-heading">
+        <div>
+          <h2>Settings</h2>
+          <p>Configure the game, livestream connections, and question list.</p>
+        </div>
+        <span class="settings-saved-note">Saved to this project</span>
       </div>
 
-      <div class="leaderboard-panel">
-        <h3>Facebook Leaderboard</h3>
-        <div
-          id="facebook-leaderboard-list"
-          class="leaderboard-list"
-        ></div>
+      <div class="settings-layout">
+        <aside class="settings-sidebar" aria-label="Settings sections">
+          <button type="button" class="settings-tab active" data-panel="general-settings">General</button>
+          <button type="button" class="settings-tab" data-panel="platform-settings">Platforms</button>
+          <button type="button" class="settings-tab" data-panel="questions-settings">Questions</button>
+        </aside>
+
+        <div class="settings-content">
+          <section id="general-settings" class="settings-panel">
+            <div class="panel-heading">
+              <h3>Game timing</h3>
+              <p>These game settings apply to upcoming rounds after you save.</p>
+            </div>
+            <form id="general-settings-form" class="settings-form">
+              <label class="field-label" for="setting-question-duration">Question timer <span>How long viewers have to answer</span></label>
+              <div class="input-with-unit"><input id="setting-question-duration" type="number" min="1" max="600" step="1" required><span>seconds</span></div>
+
+              <label class="field-label" for="setting-transition-duration">Transition delay <span>Pause before the next question</span></label>
+              <div class="input-with-unit"><input id="setting-transition-duration" type="number" min="0" max="120" step="0.5" required><span>seconds</span></div>
+
+              <label class="field-label" for="setting-facebook-grace">Facebook extra answer time <span>Extra time after the main timer for Facebook comments</span></label>
+              <div class="input-with-unit"><input id="setting-facebook-grace" type="number" min="0" max="120" step="0.5" required><span>seconds</span></div>
+
+              <label class="field-label" for="setting-facebook-tolerance">Facebook timestamp tolerance <span>Allowed timestamp difference for Facebook comments</span></label>
+              <div class="input-with-unit"><input id="setting-facebook-tolerance" type="number" min="0" max="30" step="0.1" required><span>seconds</span></div>
+
+              <label class="field-label" for="setting-text-attempts">Text-answer attempts <span>Wrong attempts allowed per viewer on non-MCQ questions</span></label>
+              <input id="setting-text-attempts" type="number" min="1" max="10" step="1" required>
+
+              <label class="field-label" for="setting-fuzzy-threshold">Fuzzy matching threshold <span>Higher values require a closer text answer match</span></label>
+              <div class="input-with-unit"><input id="setting-fuzzy-threshold" type="number" min="70" max="100" step="1" required><span>%</span></div>
+
+              <div class="form-actions"><button class="btn btn-start" type="submit">Save game settings</button></div>
+            </form>
+          </section>
+
+          <section id="platform-settings" class="settings-panel" hidden>
+            <div class="panel-heading">
+              <h3>Livestream platforms</h3>
+              <p>Platform connections automatically reconnect after you save.</p>
+            </div>
+            <form id="platform-settings-form" class="settings-form">
+              <div class="platform-setting-card">
+                <div class="toggle-row">
+                  <div><strong>TikTok LIVE</strong><span>Connect to the account that is hosting the LIVE.</span></div>
+                  <label class="switch"><input id="setting-tiktok-enabled" type="checkbox"><span class="switch-slider"></span></label>
+                </div>
+                <label class="field-label" for="setting-tiktok-username">TikTok username</label>
+                <input id="setting-tiktok-username" type="text" placeholder="@username" autocomplete="off">
+              </div>
+
+              <div class="platform-setting-card">
+                <div class="toggle-row">
+                  <div><strong>Facebook LIVE</strong><span>Connect using the Facebook session ID.</span></div>
+                  <label class="switch"><input id="setting-facebook-enabled" type="checkbox"><span class="switch-slider"></span></label>
+                </div>
+                <label class="field-label" for="setting-facebook-session">Facebook session ID</label>
+                <input id="setting-facebook-session" type="text" placeholder="Paste your Facebook session ID" autocomplete="new-password">
+                <p id="facebook-session-status" class="field-help">Your saved session ID is shown here so you can view and edit it.</p>
+                <label class="checkbox-row"><input id="setting-facebook-clear" type="checkbox"> Remove the saved Facebook session ID</label>
+              </div>
+              <div class="form-actions"><button class="btn btn-start" type="submit">Save platform settings</button></div>
+              <p class="settings-warning">Your session ID is sensitive. This dashboard is intended for local use only; do not expose it to the internet or share screenshots of this page.</p>
+            </form>
+          </section>
+
+          <section id="questions-settings" class="settings-panel" hidden>
+            <div class="panel-heading question-manager-heading">
+              <div><h3>Question manager</h3><p>Add, edit, remove, and reorder questions. Changes are saved to data/questions.json.</p></div>
+              <button id="add-question-button" type="button" class="btn btn-start small-btn">＋ Add question</button>
+            </div>
+            <div id="question-editor" class="question-editor" hidden>
+              <h4 id="question-editor-title">Add a question</h4>
+              <form id="question-form" class="settings-form">
+                <label class="field-label" for="question-type">Question type</label>
+                <select id="question-type"><option value="question">Timed question</option><option value="welcome">Welcome screen (no answer/timer)</option></select>
+
+                <label class="field-label" for="question-text">Question text</label>
+                <textarea id="question-text" rows="3" maxlength="1000" required placeholder="Enter your question"></textarea>
+
+                <div id="answer-type-group">
+                  <label class="field-label" for="question-answer-type">Answer format</label>
+                  <select id="question-answer-type">
+                    <option value="mcq">Multiple choice (MCQ)</option>
+                    <option value="text">Text answer</option>
+                    <option value="number">Number</option>
+                    <option value="numbered_text">Numbered text (exact)</option>
+                    <option value="roman_numeral">Roman numeral (exact)</option>
+                  </select>
+                </div>
+
+                <div id="mcq-editor-fields">
+                  <label class="field-label">Answer options <span>Fill in at least two options</span></label>
+                  <div class="option-input-grid">
+                    <label>A <input id="option-a" type="text" maxlength="250"></label>
+                    <label>B <input id="option-b" type="text" maxlength="250"></label>
+                    <label>C <input id="option-c" type="text" maxlength="250"></label>
+                    <label>D <input id="option-d" type="text" maxlength="250"></label>
+                  </div>
+                  <fieldset class="correct-answer-fieldset"><legend>Correct answer(s)</legend><div class="answer-checks">
+                    <label><input type="checkbox" name="correct-option" value="A"> A</label>
+                    <label><input type="checkbox" name="correct-option" value="B"> B</label>
+                    <label><input type="checkbox" name="correct-option" value="C"> C</label>
+                    <label><input type="checkbox" name="correct-option" value="D"> D</label>
+                  </div></fieldset>
+                </div>
+
+                <div id="text-answer-fields" hidden>
+                  <label class="field-label" for="question-answers">Accepted answer(s) <span>Enter one answer per line. Multiple answers are supported.</span></label>
+                  <textarea id="question-answers" rows="3" placeholder="Paris&#10;City of Paris"></textarea>
+                </div>
+                <div class="form-actions editor-actions">
+                  <button id="cancel-question-edit" class="btn btn-secondary" type="button">Cancel</button>
+                  <button class="btn btn-start" type="submit">Save question</button>
+                </div>
+              </form>
+            </div>
+
+            <div id="question-list" class="question-list" aria-live="polite"></div>
+            <div class="question-save-row">
+              <span id="question-save-status" class="field-help">Question edits are not saved until you click Save question list.</span>
+              <button id="save-questions-button" type="button" class="btn btn-start">Save question list</button>
+            </div>
+          </section>
+        </div>
       </div>
     </section>
-
-    <!-- System Telemetry -->
-    <footer
-      id="system-telemetry"
-      class="system-telemetry"
-    >
-      <div class="platform-badges">
-        <div
-          id="tiktok-status"
-          class="telemetry-tag"
-        >
-          <span class="status-dot"></span>
-          <span>
-            TikTok:
-            <strong class="status-text">OFFLINE</strong>
-          </span>
-        </div>
-
-        <div
-          id="fb-status"
-          class="telemetry-tag"
-        >
-          <span class="status-dot"></span>
-          <span>
-            Facebook:
-            <strong class="status-text">OFFLINE</strong>
-          </span>
-        </div>
-      </div>
-
-      <div id="queue-stats">
-        Queue: 0/10000
-      </div>
-    </footer>
-
   </div>
 
   <script src="/static/app.js"></script>
+  <script src="/static/settings.js"></script>
 </body>
 </html>

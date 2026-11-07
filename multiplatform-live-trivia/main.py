@@ -6,7 +6,9 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict
 import json
 import logging
+import math
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -23,7 +25,10 @@ from app.models import (
     GameState,
 )
 from app.services.persistence import atomic_write_file, save_json_atomic
-from app.services.question_loader import load_questions
+from app.services.question_loader import (
+    load_questions,
+    validate_and_parse_questions,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -231,6 +236,9 @@ async def lifespan(app: FastAPI):
         max_text_attempts=int(
             game_cfg.get("max_text_attempts", 1)
         ),
+        fuzzy_threshold=float(
+            game_cfg.get("fuzzy_threshold", 90.0)
+        ),
         result_duration_sec=float(
             game_cfg.get(
                 "result_duration_sec",
@@ -328,6 +336,8 @@ async def lifespan(app: FastAPI):
 
     app.state.tiktok_adapter = tiktok_adapter
     app.state.facebook_adapter = facebook_adapter
+    app.state.adapter_tasks = adapter_tasks
+    app.state.platform_restart_lock = asyncio.Lock()
 
     engine.start()
 
@@ -343,15 +353,19 @@ async def lifespan(app: FastAPI):
             # loop: it feeds every connected dashboard.
             try:
                 snapshot = engine.get_snapshot()
+                # Dashboard settings can replace adapters while the app is
+                # running, so always read the current instances from app.state.
+                current_tiktok = getattr(app.state, "tiktok_adapter", None)
+                current_facebook = getattr(app.state, "facebook_adapter", None)
 
                 snapshot.platforms = build_platform_snapshot(
-                    tiktok_adapter,
-                    facebook_adapter,
+                    current_tiktok,
+                    current_facebook,
                 )
 
                 snapshot.dropped_messages = total_dropped_messages(
-                    tiktok_adapter,
-                    facebook_adapter,
+                    current_tiktok,
+                    current_facebook,
                 )
 
                 await broadcast_snapshot(snapshot)
@@ -408,23 +422,112 @@ async def lifespan(app: FastAPI):
             return_exceptions=True,
         )
 
-        for task in adapter_tasks:
+        current_tasks = list(getattr(app.state, "adapter_tasks", adapter_tasks))
+        current_tiktok = getattr(app.state, "tiktok_adapter", tiktok_adapter)
+        current_facebook = getattr(app.state, "facebook_adapter", facebook_adapter)
+        if current_tiktok is not None:
+            await current_tiktok.stop()
+        if current_facebook is not None:
+            await current_facebook.stop()
+        for task in current_tasks:
             if not task.done():
                 task.cancel()
-
-        if adapter_tasks:
-            await asyncio.gather(
-                *adapter_tasks,
-                return_exceptions=True,
-            )
-
-        if tiktok_adapter is not None:
-            await tiktok_adapter.stop()
-
-        if facebook_adapter is not None:
-            await facebook_adapter.stop()
+        if current_tasks:
+            await asyncio.gather(*current_tasks, return_exceptions=True)
 
         await engine.stop()
+
+
+def configured_questions_path() -> Path:
+    """Resolve the configured question file without allowing path traversal."""
+    filename = str(CONFIG.get("questions_file", "questions.json"))
+    data_candidate = (BASE_DIR / "data" / filename).resolve()
+    data_root = (BASE_DIR / "data").resolve()
+
+    if data_candidate.is_relative_to(data_root) and data_candidate.exists():
+        return data_candidate
+
+    legacy_candidate = (BASE_DIR / filename).resolve()
+    if legacy_candidate.parent == BASE_DIR and legacy_candidate.exists():
+        return legacy_candidate
+
+    if data_candidate.is_relative_to(data_root):
+        return data_candidate
+
+    raise HTTPException(
+        status_code=400,
+        detail="Invalid questions file path in config.json.",
+    )
+
+
+def public_settings() -> dict[str, Any]:
+    """Return editable settings while never exposing platform secrets."""
+    game = CONFIG.get("game", {})
+    timing = CONFIG.get("timing", {})
+    tiktok = CONFIG.get("tiktok", {})
+    facebook = CONFIG.get("facebook", {})
+    return {
+        "game": {
+            "question_duration_sec": float(game.get("question_duration_sec", 20.0)),
+            "transition_duration_sec": float(game.get("transition_duration_sec", 3.0)),
+            "max_text_attempts": int(game.get("max_text_attempts", 1)),
+            "fuzzy_threshold": float(game.get("fuzzy_threshold", 90.0)),
+        },
+        "timing": {
+            "facebook_answer_grace_sec": float(timing.get("facebook_answer_grace_sec", 0.0)),
+            "facebook_tolerance_sec": float(timing.get("facebook_tolerance_sec", 1.0)),
+        },
+        "tiktok": {
+            "enabled": bool(tiktok.get("enabled", True)),
+            "username": str(tiktok.get("username", "")),
+        },
+        "facebook": {
+            "enabled": bool(facebook.get("enabled", True)),
+            # The user explicitly requested that this local dashboard display
+            # the saved ID. Keep the dashboard bound to localhost.
+            "session_id": str(facebook.get("session_id", "")),
+            "session_id_configured": bool(str(facebook.get("session_id", "")).strip()),
+        },
+    }
+
+
+def _number(value: Any, label: str, minimum: float, maximum: float) -> float:
+    if isinstance(value, bool):
+        raise HTTPException(status_code=422, detail=f"{label} must be a number.")
+    try:
+        result = float(value)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{label} must be a number.",
+        ) from exc
+    if not math.isfinite(result) or not minimum <= result <= maximum:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{label} must be between {minimum:g} and {maximum:g}.",
+        )
+    return result
+
+
+def _apply_live_game_settings() -> None:
+    """Apply timing/matching options to the engine for future rounds."""
+    engine: TriviaEngine | None = getattr(app.state, "engine", None)
+    if engine is None:
+        return
+
+    game = CONFIG.get("game", {})
+    timing = CONFIG.get("timing", {})
+    engine.question_duration_sec = float(game.get("question_duration_sec", 20.0))
+    engine.transition_duration_sec = float(game.get("transition_duration_sec", 3.0))
+    engine.max_text_attempts = max(1, int(game.get("max_text_attempts", 1)))
+    engine.fuzzy_threshold = float(game.get("fuzzy_threshold", 90.0))
+    facebook_active = getattr(app.state, "facebook_adapter", None) is not None
+    engine.facebook_answer_grace_sec = (
+        float(timing.get("facebook_answer_grace_sec", 0.0))
+        if facebook_active
+        else 0.0
+    )
+    engine.fb_tolerance_sec = float(timing.get("facebook_tolerance_sec", 1.0))
 
 
 app = FastAPI(
@@ -451,6 +554,223 @@ async def get_overlay():
     return FileResponse(
         WEB_DIR / "index.html"
     )
+
+
+async def _restart_platform_adapters() -> None:
+    """Reconnect enabled chat adapters using the latest in-memory config."""
+    lock: asyncio.Lock = getattr(app.state, "platform_restart_lock", asyncio.Lock())
+    async with lock:
+        old_tiktok = getattr(app.state, "tiktok_adapter", None)
+        old_facebook = getattr(app.state, "facebook_adapter", None)
+        old_tasks = list(getattr(app.state, "adapter_tasks", []))
+
+        # Stop adapters before cancelling their supervisor tasks.
+        if old_tiktok is not None:
+            await old_tiktok.stop()
+        if old_facebook is not None:
+            await old_facebook.stop()
+        for task in old_tasks:
+            if not task.done():
+                task.cancel()
+        if old_tasks:
+            await asyncio.gather(*old_tasks, return_exceptions=True)
+
+        queue = app.state.chat_queue
+        tiktok_cfg = CONFIG.get("tiktok", {})
+        facebook_cfg = CONFIG.get("facebook", {})
+        tiktok_adapter = None
+        facebook_adapter = None
+        tasks: list[asyncio.Task] = []
+
+        if tiktok_cfg.get("enabled", True) and str(tiktok_cfg.get("username", "")).strip():
+            tiktok_adapter = TikTokAdapter(
+                username=str(tiktok_cfg.get("username", "")),
+                chat_queue=queue,
+            )
+            tasks.append(asyncio.create_task(tiktok_adapter.start()))
+
+        session_id = str(facebook_cfg.get("session_id", "") or "").strip()
+        if facebook_cfg.get("enabled", True) and session_id:
+            facebook_adapter = FacebookAdapter(session_id=session_id, chat_queue=queue)
+            tasks.append(asyncio.create_task(facebook_adapter.start()))
+
+        app.state.tiktok_adapter = tiktok_adapter
+        app.state.facebook_adapter = facebook_adapter
+        app.state.adapter_tasks = tasks
+        _apply_live_game_settings()
+        logger.info("Livestream adapters reloaded from dashboard settings.")
+
+
+@app.get("/api/settings")
+async def get_settings():
+    return public_settings()
+
+
+@app.put("/api/settings")
+async def update_settings(payload: dict[str, Any]):
+    """Persist settings and hot-reload platform adapters when credentials change."""
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="Settings payload must be an object.")
+
+    # Work on copies so an invalid request cannot partially mutate CONFIG.
+    game = dict(CONFIG.get("game", {}))
+    timing = dict(CONFIG.get("timing", {}))
+    tiktok = dict(CONFIG.get("tiktok", {}))
+    facebook = dict(CONFIG.get("facebook", {}))
+    old_tiktok = dict(tiktok)
+    old_facebook = dict(facebook)
+
+    game_payload = payload.get("game", {})
+    timing_payload = payload.get("timing", {})
+    tiktok_payload = payload.get("tiktok", {})
+    facebook_payload = payload.get("facebook", {})
+
+    if not all(isinstance(section, dict) for section in (
+        game_payload, timing_payload, tiktok_payload, facebook_payload
+    )):
+        raise HTTPException(status_code=422, detail="Each settings section must be an object.")
+
+    text_attempts = _number(
+        game_payload.get("max_text_attempts", game.get("max_text_attempts", 1)),
+        "Text answer attempts", 1, 10,
+    )
+    if not text_attempts.is_integer():
+        raise HTTPException(status_code=422, detail="Text answer attempts must be a whole number.")
+
+    game.update({
+        "question_duration_sec": _number(
+            game_payload.get("question_duration_sec", game.get("question_duration_sec", 20)),
+            "Question duration", 1, 600,
+        ),
+        "transition_duration_sec": _number(
+            game_payload.get("transition_duration_sec", game.get("transition_duration_sec", 3)),
+            "Transition delay", 0, 120,
+        ),
+        "max_text_attempts": int(text_attempts),
+        "fuzzy_threshold": _number(
+            game_payload.get("fuzzy_threshold", game.get("fuzzy_threshold", 90)),
+            "Fuzzy matching threshold", 70, 100,
+        ),
+    })
+    timing.update({
+        "facebook_answer_grace_sec": _number(
+            timing_payload.get("facebook_answer_grace_sec", timing.get("facebook_answer_grace_sec", 0)),
+            "Facebook extra answer time", 0, 120,
+        ),
+        "facebook_tolerance_sec": _number(
+            timing_payload.get("facebook_tolerance_sec", timing.get("facebook_tolerance_sec", 1)),
+            "Facebook timestamp tolerance", 0, 30,
+        ),
+    })
+
+    if "enabled" in tiktok_payload:
+        if not isinstance(tiktok_payload["enabled"], bool):
+            raise HTTPException(status_code=422, detail="TikTok enabled must be true or false.")
+        tiktok["enabled"] = tiktok_payload["enabled"]
+    if "username" in tiktok_payload:
+        username = str(tiktok_payload["username"]).strip()
+        if len(username) > 100:
+            raise HTTPException(status_code=422, detail="TikTok username is too long.")
+        tiktok["username"] = username
+
+    if "enabled" in facebook_payload:
+        if not isinstance(facebook_payload["enabled"], bool):
+            raise HTTPException(status_code=422, detail="Facebook enabled must be true or false.")
+        facebook["enabled"] = facebook_payload["enabled"]
+    if "session_id" in facebook_payload:
+        session_id = str(facebook_payload["session_id"] or "").strip()
+        if len(session_id) > 10000:
+            raise HTTPException(status_code=422, detail="Facebook session ID is too long.")
+        if session_id:
+            facebook["session_id"] = session_id
+    if facebook_payload.get("clear_session_id") is True:
+        facebook["session_id"] = ""
+
+    previous = {key: CONFIG.get(key) for key in ("game", "timing", "tiktok", "facebook")}
+    CONFIG["game"] = game
+    CONFIG["timing"] = timing
+    CONFIG["tiktok"] = tiktok
+    CONFIG["facebook"] = facebook
+
+    try:
+        save_json_atomic(CONFIG_PATH, CONFIG)
+    except OSError as exc:
+        CONFIG.update(previous)
+        logger.exception("Could not save dashboard settings.")
+        raise HTTPException(status_code=500, detail="Could not save settings to config.json.") from exc
+
+    _apply_live_game_settings()
+    platforms_reloaded = tiktok != old_tiktok or facebook != old_facebook
+    if platforms_reloaded:
+        try:
+            await _restart_platform_adapters()
+        except Exception as exc:
+            logger.exception("Could not reload livestream adapters after settings update.")
+            raise HTTPException(
+                status_code=500,
+                detail="Settings were saved, but a platform could not be restarted. Check the application log.",
+            ) from exc
+    return {
+        "status": "ok",
+        "settings": public_settings(),
+        "restart_required": False,
+        "platforms_reloaded": platforms_reloaded,
+        "message": (
+            "Settings saved. Platform connections are restarting now."
+            if platforms_reloaded
+            else "Settings saved. Game settings apply to upcoming rounds."
+        ),
+    }
+
+
+@app.get("/api/questions")
+async def get_questions():
+    path = configured_questions_path()
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            questions = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.exception("Could not read the configured questions file.")
+        raise HTTPException(status_code=500, detail="Could not read questions.json.") from exc
+    return {"questions": questions}
+
+
+@app.put("/api/questions")
+async def replace_questions(payload: dict[str, Any]):
+    """Validate and replace the complete ordered question list."""
+    raw_questions = payload.get("questions") if isinstance(payload, dict) else None
+    if not isinstance(raw_questions, list) or any(
+        not isinstance(item, dict) for item in raw_questions
+    ):
+        raise HTTPException(status_code=422, detail="Questions must be a list of question objects.")
+    try:
+        parsed_questions = validate_and_parse_questions(raw_questions)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    engine: TriviaEngine | None = getattr(app.state, "engine", None)
+    if engine is not None and engine.state != GameState.WAITING_FOR_START:
+        raise HTTPException(
+            status_code=409,
+            detail="Questions can only be changed while the game is waiting for the host to start the next question.",
+        )
+    if engine is not None and engine.current_question_index >= len(parsed_questions):
+        raise HTTPException(
+            status_code=422,
+            detail="The new question list is shorter than the current game position. Stop and restart the app before replacing it.",
+        )
+
+    path = configured_questions_path()
+    try:
+        save_json_atomic(path, raw_questions)
+    except OSError as exc:
+        logger.exception("Could not save questions.")
+        raise HTTPException(status_code=500, detail="Could not save questions.json.") from exc
+
+    if engine is not None:
+        engine.questions = parsed_questions
+
+    return {"status": "ok", "count": len(parsed_questions), "questions": raw_questions}
 
 
 @app.get("/status")

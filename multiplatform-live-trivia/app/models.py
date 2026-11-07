@@ -112,3 +112,4 @@ class GameSnapshot:
     facebook_grace_time_remaining: Optional[float] = None
     facebook_grace_duration_sec: float = 0.0
     question_type: str = "question"
+    question_duration_sec: float = 0.0

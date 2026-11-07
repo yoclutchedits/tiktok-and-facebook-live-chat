@@ -1,116 +1,142 @@
-# Multiplatform LIVE Trivia — Daily User Guide
+MULTIPLATFORM LIVE TRIVIA — USER GUIDE
+======================================
 
-## 1. Start the Trivia Program
+This guide is written for running the application on Windows. The project can
+be packaged and edited on Arch Linux, but the Windows launcher scripts must be
+run on the Windows computer.
 
-Open the **Multiplatform LIVE Trivia** project folder.
+1. FIRST-TIME WINDOWS SETUP
+---------------------------
 
-Right-click inside the folder and choose **Open in Terminal**.
+1. Extract the project ZIP into a permanent folder, for example:
+   Documents\Multiplatform Live Trivia
+   Do not move or delete this folder after creating the Desktop shortcut.
 
-Run:
+2. Install Python 3.12 on Windows and enable the option to add Python to PATH.
+   The launcher prefers the Python 3.12 launcher command (py -3.12); if that
+   command is unavailable, it uses the default python command on PATH.
 
-```bash
-python main.py
-```
+3. Open the extracted project folder.
 
-Keep this terminal open while using the trivia.
+4. Double-click "Create Desktop Shortcut.bat" once. This creates a shortcut
+   named "Multiplatform Live Trivia" on your Windows Desktop. You can also run
+   "Create Desktop Shortcut.ps1" from PowerShell.
 
-Then open a web browser and go to:
+5. Double-click the new Desktop shortcut to start the application. On the
+   first launch, the script creates a local .venv and installs the packages
+   listed in requirements.txt. An internet connection is needed for this
+   first installation. It then starts the server and opens the dashboard in
+   your browser. Keep the terminal window open while using the app.
 
-```text
-http://127.0.0.1:8000
-```
+You can also start the app directly by double-clicking "Start Trivia.bat" in
+its project folder. The Desktop shortcut is just a convenient way to run that
+same launcher.
 
-This opens the Trivia Dashboard.
+Dashboard:  http://127.0.0.1:8000
+OBS overlay: http://127.0.0.1:8000/overlay
 
----
+2. DASHBOARD SETTINGS
+---------------------
 
-## 2. Prepare the LIVE
+Open the Settings tab in the dashboard.
 
-### TikTok
+General
+- Question timer: how long viewers have to answer.
+- Result duration / transition delay: how long result and transition screens
+  are displayed.
+- Facebook extra answer time and timestamp tolerance: timing allowances for
+  Facebook comments.
+- Text-answer attempts and fuzzy matching threshold: controls for text
+  answer matching.
+- Game timing and matching changes apply to upcoming rounds.
 
-Start the TikTok LIVE normally.
+Platforms
+- Enable or disable TikTok and Facebook.
+- Edit the TikTok username and Facebook session ID.
+- The saved Facebook session ID is displayed in the settings page so you can
+  review or edit it.
+- Saving platform connection settings automatically stops and reconnects the
+  relevant platform adapter. You do not need to close the dashboard or restart
+  the Python application. Allow the connection a moment to come back online.
 
-The trivia program will automatically connect to the TikTok LIVE using the configured account.
+IMPORTANT: The Facebook session ID is a private credential. It is stored in
+local config.json and is intentionally visible in the local dashboard. Do not
+share config.json, publish it, or expose the dashboard to the public internet.
+Keep the server bound to 127.0.0.1 unless you have separately secured access.
 
-### Facebook
+3. MANAGING QUESTIONS
+---------------------
 
-Before using Facebook LIVE:
+Open Settings, then Questions.
 
-1. Open the saved **Social Stream Ninja** session.
-2. Make sure the Facebook LIVE is connected.
-3. Keep the Social Stream Ninja Dock open.
-4. Do not close the Social Stream Ninja window while the trivia is running.
+You can:
+- Add, edit, delete, and reorder questions.
+- Create welcome screens that do not have an answer timer.
+- Create multiple-choice questions (MCQ) with options A, B, C, and D.
+- Select one or multiple correct MCQ options.
+- Create text and supported numeric answer questions.
 
----
+Use the question editor's Save question list button to save the ordered list
+to data/questions.json. Questions can only be saved when the game is waiting
+for the host to start the next question. This prevents edits from changing a
+question sequence in the middle of an active round or while results are shown.
 
-## 3. Check the Dashboard
+4. PREPARING A LIVE
+-------------------
 
-On the Trivia Dashboard, check that the platforms are connected.
+1. Start the TikTok LIVE and/or Facebook LIVE you intend to use.
+2. Open the trivia dashboard and check that the desired platforms show as
+   connected.
+3. Check that the question list and game settings are correct.
+4. In OBS, use a Browser Source pointing to:
+   http://127.0.0.1:8000/overlay
+5. Keep the trivia terminal window and the required live/platform connections
+   running during the game.
 
-The question and leaderboard will appear on the dashboard.
+For Facebook, continue to follow the connection requirements of the Facebook
+adapter and any existing Social Stream Ninja setup used by your installation.
+Do not close a required helper window while the Facebook connection depends
+on it.
 
-OBS should already be configured to show:
+5. RUNNING A GAME
+-----------------
 
-```text
-http://127.0.0.1:8000/overlay
-```
+1. Make sure at least one intended LIVE platform is connected.
+2. Click START ROUND in the dashboard.
+3. The current question appears on the dashboard and OBS overlay.
+4. Viewers submit answers in the LIVE chat.
+5. Correct answers receive points according to the configured matching rules.
+6. When the round ends, the results are displayed.
+7. Click START ROUND again when ready for the next question.
 
-Do not change the OBS Browser Source.
+Repeat until the question list is finished. The leaderboard is updated as the
+game runs and saved by the application.
 
----
+6. SHUTTING DOWN
+----------------
 
-## 4. Start the Trivia
+1. Finish or stop the live game.
+2. Close the dashboard browser tab if desired.
+3. In the launcher terminal window, press Ctrl+C to stop the server.
+4. You can start it next time using the Desktop shortcut.
 
-When everything is ready:
+Do not launch multiple copies of the application at the same time.
 
-1. Make sure the LIVE is running.
-2. Make sure the platforms are connected.
-3. Click **START ROUND**.
-4. The question appears.
-5. Viewers answer in the LIVE chat.
-6. Correct answers automatically receive points.
-7. When the timer ends, the result is shown.
-8. Click **START ROUND** again for the next question.
+7. ARCH LINUX DEVELOPMENT NOTES
+--------------------------------
 
-Repeat until all questions are finished.
+The Windows .bat and .ps1 files are included in the ZIP while developing on
+Arch Linux, but they are intended to run on Windows only.
 
----
+To run the project on Arch Linux for development/testing:
 
-## 5. Questions
+    python -m venv .venv
+    source .venv/bin/activate
+    python -m pip install -r requirements.txt
+    python main.py
 
-The questions are already prepared in:
+Then open http://127.0.0.1:8000 in a browser. Run tests with:
 
-```text
-data/questions.json
-```
+    python -m pytest -q
 
-For normal daily use, **do not edit this file**.
-
-The person using the program only needs to start the game and run the rounds.
-
----
-
-## 6. After the Game
-
-When the last question finishes, the final leaderboard is displayed.
-
-The scores are automatically saved.
-
-To finish for the day:
-
-1. Stop the LIVE.
-2. Close the Trivia browser page.
-3. Stop the program by pressing `Ctrl + C` in the terminal.
-
-The next day, start the program again with:
-
-```bash
-python main.py
-```
-
-## Important
-
-* Keep the terminal running while Trivia is being used.
-* Keep Social Stream Ninja open during Facebook LIVE.
-* Do not close or change the project files during a game.
-* Do not start `main.py` more than once.
+Keep real platform credentials out of public repositories and shared ZIPs.

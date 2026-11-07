@@ -53,6 +53,7 @@ class TriviaEngine:
         drain_hard_cap_sec: float = 1.5,
         facebook_answer_grace_sec: float = 0.0,
         max_text_attempts: int = 1,
+        fuzzy_threshold: float = 90.0,
     ) -> None:
         self.questions = questions
         self.chat_queue = chat_queue
@@ -98,6 +99,16 @@ class TriviaEngine:
         # count messages that are a valid option, so chit-chat never burns
         # an attempt.
         self.max_text_attempts = max(1, int(max_text_attempts))
+        self.fuzzy_threshold = min(100.0, max(0.0, float(fuzzy_threshold)))
+
+        # Capture one consistent settings snapshot per round. Dashboard edits
+        # made during a question are picked up by the next question.
+        self.current_question_duration_sec = self.question_duration_sec
+        self.current_facebook_answer_grace_sec = self.facebook_answer_grace_sec
+        self.current_fb_tolerance_sec = self.fb_tolerance_sec
+        self.current_max_text_attempts = self.max_text_attempts
+        self.current_fuzzy_threshold = self.fuzzy_threshold
+        self._round_config_active = False
 
         self.snapshot_callback = snapshot_callback
 
@@ -316,6 +327,13 @@ class TriviaEngine:
         """Run the active question, drain answers, then wait for Space."""
         self.state = GameState.ACTIVE
 
+        self.current_question_duration_sec = self.question_duration_sec
+        self.current_facebook_answer_grace_sec = self.facebook_answer_grace_sec
+        self.current_fb_tolerance_sec = self.fb_tolerance_sec
+        self.current_max_text_attempts = self.max_text_attempts
+        self.current_fuzzy_threshold = self.fuzzy_threshold
+        self._round_config_active = True
+
         self.question_winner = None
         self.answered_users_this_question.clear()
         self.attempts_this_question.clear()
@@ -327,7 +345,7 @@ class TriviaEngine:
 
         self.current_deadline = (
             self.round_start_mono
-            + self.question_duration_sec
+            + self.current_question_duration_sec
         )
 
         self._notify_snapshot()
@@ -462,7 +480,7 @@ class TriviaEngine:
 
         facebook_grace_deadline = (
             question_deadline
-            + self.facebook_answer_grace_sec
+            + self.current_facebook_answer_grace_sec
         )
 
         # Preserve the full Facebook grace period and give queued
@@ -582,7 +600,7 @@ class TriviaEngine:
 
         if platform == Platform.FACEBOOK.value:
             message_deadline += (
-                self.facebook_answer_grace_sec
+                self.current_facebook_answer_grace_sec
             )
 
         # Inclusive start, exclusive deadline.
@@ -611,7 +629,7 @@ class TriviaEngine:
 
             earliest_allowed = (
                 self.round_start_wall_utc.timestamp()
-                - self.fb_tolerance_sec
+                - self.current_fb_tolerance_sec
             )
 
             if created_at.timestamp() < earliest_allowed:
@@ -648,7 +666,11 @@ class TriviaEngine:
                 return
             max_attempts = 1
         else:
-            max_attempts = self.max_text_attempts
+            max_attempts = (
+                self.current_max_text_attempts
+                if self._round_config_active
+                else self.max_text_attempts
+            )
 
         used = self.attempts_this_question.get(user_key, 0)
 
@@ -667,6 +689,11 @@ class TriviaEngine:
             user_input=msg.text,
             expected_answers=question.answers,
             explicit_type=explicit_type,
+            fuzzy_threshold=(
+                self.current_fuzzy_threshold
+                if self._round_config_active
+                else self.fuzzy_threshold
+            ),
         )
 
         if not is_correct:
@@ -780,7 +807,7 @@ class TriviaEngine:
                 0.0,
                 (
                     self.current_deadline
-                    + self.facebook_answer_grace_sec
+                    + self.current_facebook_answer_grace_sec
                     - time.monotonic()
                 ),
             )
@@ -815,9 +842,10 @@ class TriviaEngine:
                 facebook_grace_time_remaining
             ),
             facebook_grace_duration_sec=(
-                self.facebook_answer_grace_sec
+                self.current_facebook_answer_grace_sec
             ),
             question_type=question_type,
+            question_duration_sec=self.current_question_duration_sec,
         )
 
     def _notify_snapshot(self) -> None:

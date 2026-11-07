@@ -74,7 +74,7 @@
   // Timer
   // --------------------------------------------------------------------------
 
-  const QUESTION_WINDOW_SEC = 15.0;
+  const QUESTION_WINDOW_SEC = 20.0;
 
   let currentSnapshot = null;
   let lastTimerSecond = null;
@@ -422,12 +422,17 @@
     timerDigits.textContent =
       String(displayedSecond);
 
+    const configuredWindow = Math.max(
+      1,
+      Number(snap.question_duration_sec || QUESTION_WINDOW_SEC)
+    );
+
     const percent =
       Math.min(
         100,
         Math.max(
           0,
-          (remaining / QUESTION_WINDOW_SEC) * 100
+          (remaining / configuredWindow) * 100
         )
       );
 
@@ -981,6 +986,8 @@
           tag === "INPUT" ||
           tag === "TEXTAREA" ||
           tag === "BUTTON" ||
+          tag === "SELECT" ||
+          document.activeElement?.closest?.("#settings-view") ||
           event.repeat
         ) {
           return;
